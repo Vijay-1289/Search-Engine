@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Search Engine</title>
+  <style>
+    /* General reset */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Arial', sans-serif;
+      overflow: hidden;
+    }
+
+    /* Background */
+    body::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: url('heaven.jpg') no-repeat center center/cover;
+      z-index: -1;
+    }
+
+    /* Falling leaves */
+    .falling-leaf {
+      position: fixed;
+      width: 40px;
+      height: 40px;
+      background: url('leaf.png') no-repeat center center/contain;
+      animation: fall linear infinite;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    @keyframes fall {
+      0% {
+        transform: translateY(-100vh) rotate(0deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(100vh) rotate(360deg);
+        opacity: 0.3;
+      }
+    }
+
+    /* Header section */
+    header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 30px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .google-logo {
+      width: 100px;
+      margin-bottom: 20px;
+    }
+
+    .search-box {
+      display: flex;
+      align-items: center;
+      border-radius: 25px;
+      padding: 10px 20px;
+      background: linear-gradient(145deg, #e6e6e6, #ffffff);
+      box-shadow: 6px 6px 12px rgba(0, 0, 0, 0.2), -6px -6px 12px rgba(255, 255, 255, 0.5);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .search-box:hover {
+      transform: translateY(-5px);
+      box-shadow: 8px 8px 20px rgba(0, 0, 0, 0.3), -8px -8px 20px rgba(255, 255, 255, 0.5);
+    }
+
+    .search-box input {
+      border: none;
+      outline: none;
+      font-size: 18px;
+      width: 300px;
+      background: transparent;
+    }
+
+    .search-box button {
+      background: #4285F4;
+      color: #fff;
+      border: none;
+      border-radius: 20px;
+      padding: 10px 20px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+
+    .search-box button:hover {
+      background: #357ae8;
+    }
+
+    /* App Buttons */
+    .app-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      justify-items: center;
+      position: relative;
+      z-index: 2;
+      padding: 20px;
+      max-width: 1200px;
+      margin: auto;
+    }
+
+    .app-button {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 20px;
+      padding: 20px;
+      width: 150px;
+      height: 150px;
+      box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .app-button:hover {
+      transform: translateY(-10px);
+      box-shadow: 0px 12px 25px rgba(0, 0, 0, 0.2);
+    }
+
+    .app-button img {
+      width: 70px;
+      margin-bottom: 10px;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.2));
+    }
+
+    .app-button span {
+      font-size: 14px;
+      font-weight: bold;
+      color: #555;
+    }
+
+    /* Lovely Footer */
+    footer {
+      margin-top: 30px;
+      font-size: 16px;
+      color: #666;
+      text-align: center;
+      position: relative;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header Section -->
+  <header>
+    <img src="Google.png" alt="Google Logo" class="google-logo">
+    <div class="search-box">
+      <input type="text" placeholder="Search Google...">
+      <button onclick="searchGoogle()">Search</button>
+    </div>
+  </header>
+
+  <!-- App Buttons -->
+  <div class="app-grid">
+    <div class="app-button" onclick="openApp('https://chat.openai.com')">
+      <img src="ChatGPT.png" alt="ChatGPT Logo">
+      <span>ChatGPT</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://web.whatsapp.com')">
+      <img src="https://img.icons8.com/3d-fluency/94/null/whatsapp.png" alt="WhatsApp Logo">
+      <span>WhatsApp Web</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmail.google.com%2Fmail%2F&ifkv=AcMMx-fdLy7JxHUvXxpC7hoKfRoAcO2BTuxupmCcUxK8vs099tJpEb9EtMkyLh-dgV8ZMgk3udvEWQ&rip=1&sacu=1&service=mail&flowName=GlifWebSignIn&flowEntry=ServiceLogin&dsh=S-669880678%3A1732890192863255&ddm=1')">
+      <img src="gmail.png" alt="Gmail Logo">
+      <span>Gmail</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://www.google.com/webhp?hl=en&sa=X&ved=0ahUKEwjCu-_i6IGKAxXq1TQHHZYXLr8QPAgI')">
+      <img src="https://img.icons8.com/3d-fluency/94/null/guest-male.png" alt="Guest Mode Logo">
+      <span>Guest Mode</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://www.canva.com')">
+      <img src="vecteezy_canva-3d-icon_47657562.png" alt="Canva Logo">
+      <span>Canva</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://www.linkedin.com')">
+      <img src="https://img.icons8.com/3d-fluency/94/null/linkedin.png" alt="LinkedIn Logo">
+      <span>LinkedIn</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://go.cloudskillsboost.google/arcade')">
+      <img src="vecteezy_arcade-game-machine-3d-render_46788704.png" alt="Arcade Logo">
+      <span>Arcade</span>
+    </div>
+    <div class="app-button" onclick="openApp('https://www.youtube.com')">
+      <img src="https://img.icons8.com/3d-fluency/94/null/youtube-play.png" alt="YouTube Logo">
+      <span>YouTube</span>
+    </div>
+  </div>
+
+  <!-- Falling Leaves Script -->
+  <script>
+    function createLeaf() {
+      const leaf = document.createElement('div');
+      leaf.classList.add('falling-leaf');
+      leaf.style.left = Math.random() * 100 + 'vw';
+      leaf.style.animationDuration = Math.random() * 5 + 5 + 's';
+      document.body.appendChild(leaf);
+
+      setTimeout(() => {
+        leaf.remove();
+      }, 10000);
+    }
+
+    setInterval(createLeaf, 500);
+
+    function searchGoogle() {
+      const query = document.querySelector('.search-box input').value;
+      if (query) {
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+      }
+    }
+
+    function openApp(url) {
+      window.open(url, '_blank');
+    }
+  </script>
+</body>
+</html>
