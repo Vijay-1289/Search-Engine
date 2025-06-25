@@ -244,28 +244,6 @@
 </head>
 <body>
   <div class="main-layout">
-    <!-- Sidebar Spotify Player -->
-    <aside class="sidebar-player">
-      <div class="spotify-player-custom" id="spotify-player-custom">
-        <div class="player-artwork-container">
-          <img id="player-artwork" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" alt="Artwork" />
-        </div>
-        <div class="player-info">
-          <div class="player-times">
-            <span id="current-time">00:00</span>
-            <input type="range" id="seek-bar" min="0" max="100" value="0">
-            <span id="duration">00:00</span>
-          </div>
-          <div class="player-title" id="player-title">Not Playing</div>
-          <div class="player-controls">
-            <button id="prev-btn">⏮️</button>
-            <button id="play-btn">▶️</button>
-            <button id="next-btn">⏭️</button>
-          </div>
-          <button id="login-btn">Login with Spotify</button>
-        </div>
-      </div>
-    </aside>
     <!-- Main Content -->
     <main class="main-content">
       <!-- Header Section -->
@@ -315,6 +293,28 @@
         Made with ❤️ by You
       </footer>
     </main>
+    <!-- Sidebar Spotify Player (Right Side) -->
+    <aside class="sidebar-player">
+      <div class="spotify-player-custom" id="spotify-player-custom">
+        <div class="player-artwork-container">
+          <img id="player-artwork" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" alt="Artwork" />
+        </div>
+        <div class="player-info">
+          <div class="player-times">
+            <span id="current-time">00:00</span>
+            <input type="range" id="seek-bar" min="0" max="100" value="0">
+            <span id="duration">00:00</span>
+          </div>
+          <div class="player-title" id="player-title">Not Playing</div>
+          <div class="player-controls">
+            <button id="prev-btn">⏮️</button>
+            <button id="play-btn">▶️</button>
+            <button id="next-btn">⏭️</button>
+          </div>
+          <button id="login-btn">Login with Spotify</button>
+        </div>
+      </div>
+    </aside>
   </div>
   <style>
     html, body {
@@ -331,19 +331,9 @@
     }
     .main-layout {
       display: flex;
+      flex-direction: row;
       height: 100vh;
       width: 100vw;
-    }
-    .sidebar-player {
-      width: 400px;
-      min-width: 320px;
-      background: rgba(248, 198, 216, 0.95);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 2px 0 10px rgba(0,0,0,0.05);
-      height: 100vh;
-      z-index: 2;
     }
     .main-content {
       flex: 1;
@@ -355,10 +345,21 @@
       background: transparent;
       min-width: 0;
     }
+    .sidebar-player {
+      width: 380px;
+      min-width: 320px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(248, 198, 216, 0.95);
+      box-shadow: -2px 0 10px rgba(0,0,0,0.05);
+      height: 100vh;
+      z-index: 2;
+    }
     .spotify-player-custom {
       width: 90%;
       max-width: 350px;
-      margin: 0 auto;
+      margin: 40px 0;
       background: #f8c6d8;
       border-radius: 20px;
       box-shadow: 0px 8px 15px rgba(0,0,0,0.1);
@@ -434,7 +435,6 @@
     #login-btn[hidden] {
       display: none;
     }
-    /* Remove old .spotify-player and .spotify-player iframe styles */
   </style>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
