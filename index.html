@@ -207,16 +207,15 @@
         </div>
       </div>
     </main>
-    <!-- Sidebar YouTube Player (Right Side) -->
+    <!-- Sidebar Spotify Player (Right Side) -->
     <aside class="sidebar-player">
-      <div class="youtube-player-custom" id="youtube-player-custom">
+      <div class="spotify-player-custom" id="spotify-player-custom">
         <div class="player-url-input" style="width:100%;text-align:center;margin-bottom:12px;">
-          <input id="youtube-url-input" type="text" placeholder="Paste YouTube URL or ID" style="width:70%;padding:6px 10px;border-radius:8px;border:1px solid #ccc;outline:none;">
-          <button id="youtube-url-btn" style="padding:6px 14px;border-radius:8px;border:none;background:#4285F4;color:#fff;cursor:pointer;">Load</button>
+          <input id="spotify-url-input" type="text" placeholder="Paste Spotify playlist URL or URI" style="width:70%;padding:6px 10px;border-radius:8px;border:1px solid #ccc;outline:none;">
+          <button id="spotify-url-btn" style="padding:6px 14px;border-radius:8px;border:none;background:#1DB954;color:#fff;cursor:pointer;">Load</button>
         </div>
-        <div class="player-artwork-container" id="youtube-artwork-container">
-          <!-- The YouTube iframe will be styled to fit here -->
-          <div id="player"></div>
+        <div class="player-artwork-container" id="spotify-artwork-container">
+          <img id="player-artwork" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" alt="Artwork" />
         </div>
         <div class="player-info">
           <div class="player-times">
@@ -224,12 +223,13 @@
             <input type="range" id="seek-bar" min="0" max="100" value="0">
             <span id="duration">00:00</span>
           </div>
-          <div class="player-title" id="player-title">YouTube Music Player</div>
+          <div class="player-title" id="player-title">Spotify Music Player</div>
           <div class="player-controls">
-            <button id="prev-btn" disabled>⏮️</button>
+            <button id="prev-btn">⏮️</button>
             <button id="play-btn">▶️</button>
-            <button id="next-btn" disabled>⏭️</button>
+            <button id="next-btn">⏭️</button>
           </div>
+          <button id="login-btn">Login with Spotify</button>
         </div>
       </div>
     </aside>
@@ -275,7 +275,7 @@
       z-index: 2;
       position: relative;
     }
-    .youtube-player-custom {
+    .spotify-player-custom {
       width: 90%;
       max-width: 350px;
       background: rgba(255, 255, 255, 0.18);
@@ -294,23 +294,23 @@
       flex-direction: column;
       align-items: center;
     }
-    #youtube-artwork-container {
+    #spotify-artwork-container {
       background: rgba(255,255,255,0.12);
       border-radius: 16px;
       padding: 10px;
       margin-bottom: 20px;
       width: 250px;
-      height: 140px;
+      height: 250px;
       display: flex;
       align-items: center;
       justify-content: center;
       box-shadow: 0 4px 16px 0 rgba(31, 38, 135, 0.10);
     }
-    #player {
-      width: 230px;
-      height: 130px;
+    #player-artwork {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
       border-radius: 12px;
-      overflow: hidden;
     }
     .player-info {
       width: 100%;
@@ -330,7 +330,7 @@
       font-size: 18px;
       font-weight: bold;
       margin-bottom: 10px;
-      color: #6d4c8b;
+      color: #1DB954;
     }
     .player-controls {
       display: flex;
@@ -352,8 +352,22 @@
     .player-controls button:hover {
       background: rgba(255,255,255,0.4);
     }
+    #login-btn {
+      margin-top: 10px;
+      background: #1DB954;
+      color: #fff;
+      border: none;
+      border-radius: 20px;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 16px;
+      box-shadow: 0 2px 8px 0 rgba(31, 38, 135, 0.10);
+    }
+    #login-btn[hidden] {
+      display: none;
+    }
   </style>
-  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
     function createLeaf() {
       const leaf = document.createElement('div');
@@ -380,95 +394,120 @@
       window.open(url, '_blank');
     }
 
-    let player;
-    let duration = 0;
-    let seekBar = null;
-    let currentTimeSpan = null;
-    let durationSpan = null;
-    let playBtn = null;
-    function extractYouTubeID(url) {
-      // Accepts full URL or just ID
+    // Spotify Auth and Player Logic
+    const clientId = '63e73b8c9c864c2aa1651fd956b0a08f';
+    const redirectUri = window.location.origin + window.location.pathname;
+    const scopes = [
+      'streaming',
+      'user-read-email',
+      'user-read-private',
+      'user-modify-playback-state',
+      'user-read-playback-state',
+      'playlist-read-private',
+      'playlist-read-collaborative',
+    ];
+    let player, deviceId, accessToken;
+    function getHashParams() {
+      const hash = window.location.hash.substring(1);
+      const params = {};
+      hash.split('&').forEach(kv => {
+        const [k, v] = kv.split('=');
+        params[k] = v;
+      });
+      return params;
+    }
+    function loginWithSpotify() {
+      const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&show_dialog=true`;
+      window.location = url;
+    }
+    function msToTime(ms) {
+      const min = Math.floor(ms / 60000);
+      const sec = Math.floor((ms % 60000) / 1000);
+      return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+    }
+    function extractSpotifyPlaylistId(url) {
+      // Accepts full URL, URI, or just ID
       if (!url) return '';
-      // Regex for various YouTube URL formats
-      const regExp = /^.*(?:youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-      const match = url.match(regExp);
-      if (match && match[1].length === 11) {
-        return match[1];
-      }
-      // If not a URL, maybe it's a raw ID
-      if (url.length === 11) return url;
+      // URL: https://open.spotify.com/playlist/PLAYLIST_ID
+      const urlMatch = url.match(/playlist[\/:]([a-zA-Z0-9]+)(\?.*)?$/);
+      if (urlMatch && urlMatch[1]) return urlMatch[1];
+      // URI: spotify:playlist:PLAYLIST_ID
+      const uriMatch = url.match(/playlist:([a-zA-Z0-9]+)/);
+      if (uriMatch && uriMatch[1]) return uriMatch[1];
+      // Raw ID
+      if (/^[a-zA-Z0-9]{22}$/.test(url)) return url;
       return '';
     }
-    function onYouTubeIframeAPIReady() {
-      player = new YT.Player('player', {
-        height: '130',
-        width: '230',
-        videoId: 'dQw4w9WgXcQ', // Default video
-        playerVars: {
-          'playsinline': 1
-        },
-        events: {
-          'onReady': onPlayerReady,
-          'onStateChange': onPlayerStateChange
-        }
-      });
+    function updatePlayerUI(state) {
+      if (!state) return;
+      document.getElementById('player-title').textContent = state.track_window.current_track.name + ' - ' + state.track_window.current_track.artists.map(a => a.name).join(', ');
+      document.getElementById('player-artwork').src = state.track_window.current_track.album.images[0]?.url || '';
+      document.getElementById('current-time').textContent = msToTime(state.position);
+      document.getElementById('duration').textContent = msToTime(state.duration);
+      document.getElementById('seek-bar').max = state.duration;
+      document.getElementById('seek-bar').value = state.position;
+      document.getElementById('play-btn').textContent = state.paused ? '▶️' : '⏸️';
     }
-    function onPlayerReady(event) {
-      duration = player.getDuration();
-      seekBar = document.getElementById('seek-bar');
-      currentTimeSpan = document.getElementById('current-time');
-      durationSpan = document.getElementById('duration');
-      playBtn = document.getElementById('play-btn');
-      seekBar.max = duration;
-      durationSpan.textContent = formatTime(duration);
-      updateTime();
-      setInterval(updateTime, 500);
-      playBtn.onclick = function() {
-        const state = player.getPlayerState();
-        if (state === YT.PlayerState.PLAYING) {
-          player.pauseVideo();
-        } else {
-          player.playVideo();
-        }
-      };
-      seekBar.oninput = function(e) {
-        player.seekTo(Number(e.target.value), true);
-      };
-      // Add handler for URL input
-      document.getElementById('youtube-url-btn').onclick = function() {
-        const url = document.getElementById('youtube-url-input').value.trim();
-        const id = extractYouTubeID(url);
-        if (id) {
-          player.loadVideoById(id);
-        } else {
-          alert('Please enter a valid YouTube URL or video ID.');
-        }
+    function setupPlayer() {
+      window.onSpotifyWebPlaybackSDKReady = () => {
+        player = new Spotify.Player({
+          name: 'Web Player',
+          getOAuthToken: cb => { cb(accessToken); },
+          volume: 0.5
+        });
+        player.addListener('ready', ({ device_id }) => {
+          deviceId = device_id;
+          // Transfer playback to this device
+          fetch('https://api.spotify.com/v1/me/player', {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: [deviceId], play: false })
+          });
+        });
+        player.addListener('player_state_changed', updatePlayerUI);
+        player.connect();
       };
     }
-    function onPlayerStateChange(event) {
-      if (event.data === YT.PlayerState.PLAYING) {
-        playBtn.textContent = '⏸️';
+    document.addEventListener('DOMContentLoaded', () => {
+      const params = getHashParams();
+      if (params.access_token) {
+        accessToken = params.access_token;
+        document.getElementById('login-btn').hidden = true;
+        setupPlayer();
       } else {
-        playBtn.textContent = '▶️';
+        document.getElementById('login-btn').onclick = loginWithSpotify;
       }
-    }
-    function updateTime() {
-      if (!player || !seekBar) return;
-      const current = player.getCurrentTime ? player.getCurrentTime() : 0;
-      seekBar.value = current;
-      currentTimeSpan.textContent = formatTime(current);
-      if (player.getDuration) {
-        duration = player.getDuration();
-        seekBar.max = duration;
-        durationSpan.textContent = formatTime(duration);
-      }
-    }
-    function formatTime(sec) {
-      sec = Math.floor(sec);
-      const min = Math.floor(sec / 60);
-      const s = sec % 60;
-      return `${min.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
+      document.getElementById('play-btn').onclick = () => {
+        if (!player) return;
+        player.togglePlay();
+      };
+      document.getElementById('prev-btn').onclick = () => {
+        if (!player) return;
+        player.previousTrack();
+      };
+      document.getElementById('next-btn').onclick = () => {
+        if (!player) return;
+        player.nextTrack();
+      };
+      document.getElementById('seek-bar').oninput = (e) => {
+        if (!player) return;
+        player.seek(Number(e.target.value));
+      };
+      document.getElementById('spotify-url-btn').onclick = () => {
+        const url = document.getElementById('spotify-url-input').value.trim();
+        const playlistId = extractSpotifyPlaylistId(url);
+        if (!playlistId) {
+          alert('Please enter a valid Spotify playlist URL, URI, or ID.');
+          return;
+        }
+        // Start playback of the playlist
+        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+          method: 'PUT',
+          headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context_uri: `spotify:playlist:${playlistId}` })
+        });
+      };
+    });
   </script>
 </body>
 </html>
