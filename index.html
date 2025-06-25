@@ -148,27 +148,87 @@
       color: #555;
     }
 
-    /* Spotify Player */
-    .spotify-player {
+    /* Spotify Player (Custom) */
+    .spotify-player-custom {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #f8c6d8;
+      border-radius: 20px;
+      box-shadow: 0px 8px 15px rgba(0,0,0,0.1);
+      padding: 40px 30px 30px 30px;
+      max-width: 350px;
+      margin: 30px auto;
+      position: relative;
+    }
+    .player-artwork-container {
+      background: #e6d6f8;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 20px;
+      width: 250px;
+      height: 250px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .player-artwork-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 10px;
+    }
+    .player-info {
+      width: 100%;
+      text-align: center;
+    }
+    .player-times {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    #seek-bar {
+      flex: 1;
+      margin: 0 10px;
+    }
+    .player-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #6d4c8b;
+    }
+    .player-controls {
       display: flex;
       justify-content: center;
-      margin: 30px auto;
-      max-width: 800px;
-      padding: 20px;
-      background: rgba(255, 255, 255, 0.9);
+      gap: 20px;
+      margin-bottom: 10px;
+    }
+    .player-controls button {
+      background: #e6d6f8;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .player-controls button:hover {
+      background: #d1b3f8;
+    }
+    #login-btn {
+      margin-top: 10px;
+      background: #4285F4;
+      color: #fff;
+      border: none;
       border-radius: 20px;
-      box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
-      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 16px;
     }
-
-    .spotify-player:hover {
-      transform: translateY(-5px);
-      box-shadow: 0px 12px 25px rgba(0, 0, 0, 0.2);
-    }
-    
-    .spotify-player iframe {
-      border-radius: 12px;
-      width: 100%;
+    #login-btn[hidden] {
+      display: none;
     }
 
     /* Lovely Footer */
@@ -193,14 +253,25 @@
     </div>
   </header>
 
-  <!-- Spotify Player -->
-  <div class="spotify-player">
-    <iframe src="https://open.spotify.com/embed/track/4SBEP372cl321jA3i22Q4W?utm_source=generator" 
-            height="80" 
-            frameBorder="0" 
-            allowfullscreen="" 
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
-            loading="lazy"></iframe>
+  <!-- Spotify Player (Custom) -->
+  <div class="spotify-player-custom" id="spotify-player-custom">
+    <div class="player-artwork-container">
+      <img id="player-artwork" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" alt="Artwork" />
+    </div>
+    <div class="player-info">
+      <div class="player-times">
+        <span id="current-time">00:00</span>
+        <input type="range" id="seek-bar" min="0" max="100" value="0">
+        <span id="duration">00:00</span>
+      </div>
+      <div class="player-title" id="player-title">Not Playing</div>
+      <div class="player-controls">
+        <button id="prev-btn">⏮️</button>
+        <button id="play-btn">▶️</button>
+        <button id="next-btn">⏭️</button>
+      </div>
+      <button id="login-btn">Login with Spotify</button>
+    </div>
   </div>
 
   <!-- App Buttons -->
@@ -239,6 +310,16 @@
     </div>
   </div>
 
+  <!-- Spotify Player -->
+  <div class="spotify-player">
+    <iframe src="https://open.spotify.com/embed/track/4SBEP372cl321jA3i22Q4W?utm_source=generator" 
+            height="80" 
+            frameBorder="0" 
+            allowfullscreen="" 
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
+            loading="lazy"></iframe>
+  </div>
+
   <!-- Falling Leaves Script -->
   <script>
     function createLeaf() {
@@ -265,6 +346,102 @@
     function openApp(url) {
       window.open(url, '_blank');
     }
+  </script>
+
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+    // Spotify Auth and Player Logic
+    const clientId = 'b8e0983d9e3a4c758814319471fa93ea';
+    const redirectUri = window.location.origin + window.location.pathname; // Make sure this matches your Spotify app settings
+    const scopes = [
+      'streaming',
+      'user-read-email',
+      'user-read-private',
+      'user-modify-playback-state',
+      'user-read-playback-state',
+    ];
+    let player, deviceId, accessToken;
+
+    function getHashParams() {
+      const hash = window.location.hash.substring(1);
+      const params = {};
+      hash.split('&').forEach(kv => {
+        const [k, v] = kv.split('=');
+        params[k] = v;
+      });
+      return params;
+    }
+
+    function loginWithSpotify() {
+      const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&show_dialog=true`;
+      window.location = url;
+    }
+
+    function msToTime(ms) {
+      const min = Math.floor(ms / 60000);
+      const sec = Math.floor((ms % 60000) / 1000);
+      return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    function updatePlayerUI(state) {
+      if (!state) return;
+      document.getElementById('player-title').textContent = state.track_window.current_track.name + ' - ' + state.track_window.current_track.artists.map(a => a.name).join(', ');
+      document.getElementById('player-artwork').src = state.track_window.current_track.album.images[0]?.url || '';
+      document.getElementById('current-time').textContent = msToTime(state.position);
+      document.getElementById('duration').textContent = msToTime(state.duration);
+      document.getElementById('seek-bar').max = state.duration;
+      document.getElementById('seek-bar').value = state.position;
+      document.getElementById('play-btn').textContent = state.paused ? '▶️' : '⏸️';
+    }
+
+    function setupPlayer() {
+      window.onSpotifyWebPlaybackSDKReady = () => {
+        player = new Spotify.Player({
+          name: 'Web Player',
+          getOAuthToken: cb => { cb(accessToken); },
+          volume: 0.5
+        });
+        player.addListener('ready', ({ device_id }) => {
+          deviceId = device_id;
+          // Transfer playback to this device
+          fetch('https://api.spotify.com/v1/me/player', {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: [deviceId], play: false })
+          });
+        });
+        player.addListener('player_state_changed', updatePlayerUI);
+        player.connect();
+      };
+    }
+
+    // Button handlers
+    document.addEventListener('DOMContentLoaded', () => {
+      const params = getHashParams();
+      if (params.access_token) {
+        accessToken = params.access_token;
+        document.getElementById('login-btn').hidden = true;
+        setupPlayer();
+      } else {
+        document.getElementById('login-btn').onclick = loginWithSpotify;
+      }
+      document.getElementById('play-btn').onclick = () => {
+        if (!player) return;
+        player.togglePlay();
+      };
+      document.getElementById('prev-btn').onclick = () => {
+        if (!player) return;
+        player.previousTrack();
+      };
+      document.getElementById('next-btn').onclick = () => {
+        if (!player) return;
+        player.nextTrack();
+      };
+      document.getElementById('seek-bar').oninput = (e) => {
+        if (!player) return;
+        player.seek(Number(e.target.value));
+      };
+    });
   </script>
 </body>
 </html>
