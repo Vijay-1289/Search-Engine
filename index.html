@@ -210,10 +210,14 @@
     <!-- Sidebar Spotify Player (Right Side) -->
     <aside class="sidebar-player">
       <div class="spotify-player-custom" id="spotify-player-custom">
-        <div class="player-url-input" style="width:100%;text-align:center;margin-bottom:12px;">
-          <input id="spotify-url-input" type="text" placeholder="Paste Spotify playlist URL or URI" style="width:70%;padding:6px 10px;border-radius:8px;border:1px solid #ccc;outline:none;">
-          <button id="spotify-url-btn" style="padding:6px 14px;border-radius:8px;border:none;background:#1DB954;color:#fff;cursor:pointer;">Load</button>
+        <div class="player-url-input">
+          <input id="spotify-url-input" type="text" placeholder="Paste Spotify playlist URL or URI">
+          <button id="spotify-url-btn">
+            Load
+            <div class="loading-indicator" id="loading-indicator"></div>
+          </button>
         </div>
+        <div class="status-message" id="status-message"></div>
         <div class="player-artwork-container" id="spotify-artwork-container">
           <img id="player-artwork" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" alt="Artwork" />
         </div>
@@ -366,6 +370,58 @@
     #login-btn[hidden] {
       display: none;
     }
+    .loading-indicator {
+      display: none;
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top: 2px solid #1DB954;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-left: 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .status-message {
+      font-size: 12px;
+      color: #1DB954;
+      margin-top: 5px;
+      text-align: center;
+      min-height: 16px;
+    }
+    .player-url-input {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+    .player-url-input input {
+      width: 70%;
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      outline: none;
+      margin-right: 8px;
+    }
+    .player-url-input button {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: none;
+      background: #1DB954;
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+    }
+    .player-url-input button:hover {
+      background: #1ed760;
+    }
+    .player-url-input button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
   </style>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
@@ -440,34 +496,169 @@
     }
     function updatePlayerUI(state) {
       if (!state) return;
-      document.getElementById('player-title').textContent = state.track_window.current_track.name + ' - ' + state.track_window.current_track.artists.map(a => a.name).join(', ');
-      document.getElementById('player-artwork').src = state.track_window.current_track.album.images[0]?.url || '';
+      
+      const track = state.track_window.current_track;
+      const artists = track.artists.map(a => a.name).join(', ');
+      
+      document.getElementById('player-title').textContent = `${track.name} - ${artists}`;
+      document.getElementById('player-artwork').src = track.album.images[0]?.url || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80';
       document.getElementById('current-time').textContent = msToTime(state.position);
       document.getElementById('duration').textContent = msToTime(state.duration);
       document.getElementById('seek-bar').max = state.duration;
       document.getElementById('seek-bar').value = state.position;
       document.getElementById('play-btn').textContent = state.paused ? '▶️' : '⏸️';
     }
+    function updateStatus(message, isError = false) {
+      const statusElement = document.getElementById('status-message');
+      statusElement.textContent = message;
+      statusElement.style.color = isError ? '#ff4444' : '#1DB954';
+    }
+    
+    function showLoading(show) {
+      const loadingIndicator = document.getElementById('loading-indicator');
+      const loadButton = document.getElementById('spotify-url-btn');
+      
+      if (show) {
+        loadingIndicator.style.display = 'block';
+        loadButton.disabled = true;
+        loadButton.textContent = 'Loading';
+      } else {
+        loadingIndicator.style.display = 'none';
+        loadButton.disabled = false;
+        loadButton.textContent = 'Load';
+      }
+    }
+    
     function setupPlayer() {
       window.onSpotifyWebPlaybackSDKReady = () => {
+        updateStatus('Connecting to Spotify...');
+        
         player = new Spotify.Player({
           name: 'Web Player',
           getOAuthToken: cb => { cb(accessToken); },
           volume: 0.5
         });
+        
         player.addListener('ready', ({ device_id }) => {
+          console.log('Player ready with device ID:', device_id);
           deviceId = device_id;
+          updateStatus('Connected! Ready to play music.');
+          
           // Transfer playback to this device
           fetch('https://api.spotify.com/v1/me/player', {
             method: 'PUT',
-            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ device_ids: [deviceId], play: false })
+            headers: { 
+              'Authorization': 'Bearer ' + accessToken, 
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ 
+              device_ids: [deviceId], 
+              play: false 
+            })
+          }).then(response => {
+            if (!response.ok) {
+              console.error('Failed to transfer playback:', response.status);
+            }
+          }).catch(error => {
+            console.error('Error transferring playback:', error);
           });
         });
-        player.addListener('player_state_changed', updatePlayerUI);
-        player.connect();
+        
+        player.addListener('not_ready', ({ device_id }) => {
+          console.log('Device ID has gone offline', device_id);
+          updateStatus('Player disconnected', true);
+        });
+        
+        player.addListener('initialization_error', ({ message }) => {
+          console.error('Failed to initialize player:', message);
+          updateStatus('Failed to initialize player', true);
+        });
+        
+        player.addListener('authentication_error', ({ message }) => {
+          console.error('Failed to authenticate:', message);
+          updateStatus('Authentication failed. Please login again.', true);
+          // Re-login if authentication fails
+          setTimeout(() => loginWithSpotify(), 2000);
+        });
+        
+        player.addListener('account_error', ({ message }) => {
+          console.error('Failed to validate Spotify account:', message);
+          updateStatus('Account error. Please check your Spotify Premium status.', true);
+        });
+        
+        player.addListener('playback_error', ({ message }) => {
+          console.error('Failed to perform playback:', message);
+          updateStatus('Playback error occurred', true);
+        });
+        
+        player.addListener('player_state_changed', state => {
+          console.log('Player state changed:', state);
+          updatePlayerUI(state);
+          
+          if (state) {
+            updateStatus('Now playing');
+          }
+        });
+        
+        player.connect().then(success => {
+          if (success) {
+            console.log('Successfully connected to Spotify!');
+          } else {
+            updateStatus('Failed to connect to Spotify', true);
+          }
+        });
       };
     }
+    
+    function loadPlaylist(playlistId) {
+      if (!deviceId || !accessToken) {
+        console.error('Device ID or access token not available');
+        updateStatus('Player not ready. Please wait...', true);
+        return;
+      }
+      
+      console.log('Loading playlist:', playlistId);
+      showLoading(true);
+      updateStatus('Loading playlist...');
+      
+      // First, transfer playback to our device
+      fetch('https://api.spotify.com/v1/me/player', {
+        method: 'PUT',
+        headers: { 
+          'Authorization': 'Bearer ' + accessToken, 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ 
+          device_ids: [deviceId], 
+          play: false 
+        })
+      }).then(() => {
+        // Then start playing the playlist
+        return fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+          method: 'PUT',
+          headers: { 
+            'Authorization': 'Bearer ' + accessToken, 
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ 
+            context_uri: `spotify:playlist:${playlistId}` 
+          })
+        });
+      }).then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        console.log('Playlist loaded successfully');
+        updateStatus('Playlist loaded successfully!');
+        document.getElementById('player-title').textContent = 'Loading playlist...';
+      }).catch(error => {
+        console.error('Error loading playlist:', error);
+        updateStatus('Failed to load playlist. Please check the URL.', true);
+      }).finally(() => {
+        showLoading(false);
+      });
+    }
+    
     document.addEventListener('DOMContentLoaded', () => {
       const params = getHashParams();
       if (params.access_token) {
@@ -477,36 +668,63 @@
       } else {
         document.getElementById('login-btn').onclick = loginWithSpotify;
       }
+      
       document.getElementById('play-btn').onclick = () => {
-        if (!player) return;
+        if (!player) {
+          alert('Please login to Spotify first');
+          return;
+        }
         player.togglePlay();
       };
+      
       document.getElementById('prev-btn').onclick = () => {
-        if (!player) return;
+        if (!player) {
+          alert('Please login to Spotify first');
+          return;
+        }
         player.previousTrack();
       };
+      
       document.getElementById('next-btn').onclick = () => {
-        if (!player) return;
+        if (!player) {
+          alert('Please login to Spotify first');
+          return;
+        }
         player.nextTrack();
       };
+      
       document.getElementById('seek-bar').oninput = (e) => {
         if (!player) return;
         player.seek(Number(e.target.value));
       };
+      
       document.getElementById('spotify-url-btn').onclick = () => {
         const url = document.getElementById('spotify-url-input').value.trim();
+        if (!url) {
+          alert('Please enter a Spotify playlist URL');
+          return;
+        }
+        
         const playlistId = extractSpotifyPlaylistId(url);
         if (!playlistId) {
           alert('Please enter a valid Spotify playlist URL, URI, or ID.');
           return;
         }
-        // Start playback of the playlist
-        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-          method: 'PUT',
-          headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context_uri: `spotify:playlist:${playlistId}` })
-        });
+        
+        if (!deviceId) {
+          alert('Please wait for the player to be ready, then try again.');
+          return;
+        }
+        
+        loadPlaylist(playlistId);
       };
+      
+      // Allow Enter key to submit playlist URL
+      document.getElementById('spotify-url-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          document.getElementById('spotify-url-btn').click();
+        }
+      });
     });
   </script>
 </body>
