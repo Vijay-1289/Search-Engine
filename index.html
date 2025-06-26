@@ -474,10 +474,21 @@
       return params;
     }
     
+    function getQueryParams() {
+      const query = window.location.search.substring(1);
+      const params = {};
+      query.split('&').forEach(kv => {
+        const [k, v] = kv.split('=');
+        params[k] = v;
+      });
+      return params;
+    }
+    
     function loginWithSpotify() {
       // Clear any existing errors
       updateStatus('Redirecting to Spotify...');
       
+      // Use implicit flow (token response type)
       const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&show_dialog=true`;
       
       try {
@@ -487,7 +498,7 @@
         updateStatus('Failed to redirect to Spotify. Please try again.', true);
       }
     }
-
+    
     function msToTime(ms) {
       const min = Math.floor(ms / 60000);
       const sec = Math.floor((ms % 60000) / 1000);
