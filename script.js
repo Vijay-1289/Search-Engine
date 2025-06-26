@@ -27,14 +27,10 @@ function openApp(url) {
 }
 
 // Spotify Auth and Player Logic
-// IMPORTANT: Replace this with your NEW Spotify app Client ID
-// Get it from: https://developer.spotify.com/dashboard
-// Create a new app with these settings:
-// - App name: "My Tool Engine Player"
-// - Redirect URI: "https://mytoolengine.netlify.app/"
-// - App type: "Web App"
-const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec'; // Your new Spotify Client ID (Web App)
-const redirectUri = 'https://mytoolengine.netlify.app/'; // Make sure this matches your app settings
+// Using Authorization Code with PKCE flow (modern approach)
+// Reference: https://developer.spotify.com/documentation/web-api
+const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec';
+const redirectUri = 'https://mytoolengine.netlify.app/';
 const scopes = [
   'streaming',
   'user-read-email',
@@ -45,6 +41,30 @@ const scopes = [
   'playlist-read-collaborative',
 ];
 let player, deviceId, accessToken;
+
+// PKCE (Proof Key for Code Exchange) functions
+function generateCodeVerifier(length) {
+  let text = '';
+  let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  for (let i = 0; i < length; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
+
+async function generateCodeChallenge(codeVerifier) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+// Store PKCE values
+let codeVerifier = '';
+let codeChallenge = '';
 
 // Define the callback before the SDK loads
 window.onSpotifyWebPlaybackSDKReady = () => {
@@ -74,69 +94,85 @@ function getQueryParams() {
   return params;
 }
 
-function loginWithSpotify() {
+async function loginWithSpotify() {
   // Clear any existing errors
-  updateStatus('Redirecting to Spotify...');
-  
-  // Use implicit flow (token response type)
-  const responseType = 'token'; // Use token for implicit flow
-  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&show_dialog=true`;
-  
-  console.log('=== SPOTIFY AUTH DEBUG ===');
-  console.log('Client ID:', clientId);
-  console.log('Redirect URI:', redirectUri);
-  console.log('Response Type:', responseType);
-  console.log('Full URL:', url);
-  console.log('========================');
+  updateStatus('Preparing Spotify authentication...');
   
   try {
+    // Generate PKCE values
+    codeVerifier = generateCodeVerifier(128);
+    codeChallenge = await generateCodeChallenge(codeVerifier);
+    
+    // Store code verifier in session storage
+    sessionStorage.setItem('spotify_code_verifier', codeVerifier);
+    
+    // Use Authorization Code flow with PKCE
+    const responseType = 'code';
+    const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&code_challenge=${codeChallenge}&code_challenge_method=S256&show_dialog=true`;
+    
+    console.log('=== SPOTIFY AUTH DEBUG (PKCE) ===');
+    console.log('Client ID:', clientId);
+    console.log('Redirect URI:', redirectUri);
+    console.log('Response Type:', responseType);
+    console.log('Code Challenge Method: S256');
+    console.log('Full URL:', url);
+    console.log('================================');
+    
+    updateStatus('Redirecting to Spotify...');
     window.location = url;
+    
   } catch (error) {
-    console.error('Error redirecting to Spotify:', error);
-    updateStatus('Failed to redirect to Spotify. Please try again.', true);
+    console.error('Error preparing Spotify auth:', error);
+    updateStatus('Failed to prepare authentication. Please try again.', true);
   }
 }
 
-function loginWithSpotifyAlternative() {
-  // Alternative login method with different parameters
-  updateStatus('Trying alternative login method...');
-  
-  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&state=123&show_dialog=true`;
-  
-  console.log('Alternative login URL:', url);
-  
+async function exchangeCodeForToken(code) {
   try {
-    window.location = url;
+    updateStatus('Exchanging authorization code for token...');
+    
+    // Get the stored code verifier
+    const storedCodeVerifier = sessionStorage.getItem('spotify_code_verifier');
+    if (!storedCodeVerifier) {
+      throw new Error('Code verifier not found in session storage');
+    }
+    
+    // Exchange code for token
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: redirectUri,
+        client_id: clientId,
+        code_verifier: storedCodeVerifier,
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Token exchange failed: ${errorData.error_description || errorData.error}`);
+    }
+    
+    const data = await response.json();
+    console.log('Token exchange successful');
+    
+    // Store the access token
+    accessToken = data.access_token;
+    
+    // Clean up session storage
+    sessionStorage.removeItem('spotify_code_verifier');
+    
+    return data.access_token;
+    
   } catch (error) {
-    console.error('Error with alternative login:', error);
-    updateStatus('Alternative login failed. Please check your Spotify app settings.', true);
+    console.error('Error exchanging code for token:', error);
+    updateStatus('Token exchange failed. Please try again.', true);
+    throw error;
   }
-}
-
-function loginWithSpotifyFallback() {
-  // Fallback method using authorization code flow (requires backend)
-  updateStatus('Trying fallback method...');
-  
-  // For now, show instructions to create a new app
-  updateStatus('Please create a new Spotify app with Web App type. See instructions in console.', true);
-  console.log(`
-    ========================================
-    SPOTIFY APP SETUP INSTRUCTIONS:
-    ========================================
-    1. Go to: https://developer.spotify.com/dashboard
-    2. Click "Create App"
-    3. Fill in:
-       - App name: "My Tool Engine Player"
-       - App description: "Web-based Spotify player"
-       - Redirect URI: "https://mytoolengine.netlify.app/"
-       - Website: "https://mytoolengine.netlify.app/"
-       - App type: "Web App"
-    4. Save the app
-    5. Copy the new Client ID
-    6. Replace 'YOUR_NEW_CLIENT_ID_HERE' in script.js
-    7. Refresh the page and try again
-    ========================================
-  `);
 }
 
 function msToTime(ms) {
@@ -338,47 +374,74 @@ function loadPlaylist(playlistId) {
 
 function testSpotifyAuth() {
   // Test function to check if the auth URL is valid
-  const responseType = 'token';
-  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&show_dialog=true`;
+  const responseType = 'code';
+  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&code_challenge=${codeChallenge}&code_challenge_method=S256&show_dialog=true`;
   
-  console.log('=== AUTH URL TEST ===');
+  console.log('=== AUTH URL TEST (PKCE) ===');
   console.log('URL:', url);
   console.log('URL Length:', url.length);
   console.log('Client ID Valid:', /^[a-f0-9]{32}$/.test(clientId));
   console.log('Redirect URI Valid:', redirectUri.startsWith('https://'));
-  console.log('=====================');
+  console.log('Code Challenge:', codeChallenge);
+  console.log('===========================');
   
   // Open URL in new tab for testing
   window.open(url, '_blank');
 }
 
 // Initialize everything when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const params = getHashParams();
+  const queryParams = getQueryParams();
   
   // Debug: Log the URL parameters
   console.log('URL hash params:', params);
+  console.log('URL query params:', queryParams);
   console.log('Current URL:', window.location.href);
   
   if (params.access_token) {
+    // Handle legacy implicit flow (if somehow still working)
     accessToken = params.access_token;
-    console.log('Access token received, length:', accessToken.length);
+    console.log('Access token received (implicit flow), length:', accessToken.length);
     document.getElementById('login-btn').hidden = true;
     updateStatus('Authentication successful! Setting up player...');
     setupPlayer();
-  } else if (params.error) {
+  } else if (queryParams.code) {
+    // Handle authorization code flow (modern approach)
+    try {
+      console.log('Authorization code received, exchanging for token...');
+      updateStatus('Authorization code received, exchanging for token...');
+      
+      const token = await exchangeCodeForToken(queryParams.code);
+      console.log('Token exchange successful, length:', token.length);
+      
+      document.getElementById('login-btn').hidden = true;
+      updateStatus('Authentication successful! Setting up player...');
+      setupPlayer();
+      
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+    } catch (error) {
+      console.error('Token exchange failed:', error);
+      updateStatus('Authentication failed. Please try again.', true);
+      document.getElementById('login-btn').hidden = false;
+      document.getElementById('login-btn').onclick = loginWithSpotify;
+    }
+  } else if (params.error || queryParams.error) {
     // Handle authentication errors
-    console.error('Spotify auth error:', params.error);
+    const error = params.error || queryParams.error;
+    console.error('Spotify auth error:', error);
     let errorMessage = 'Authentication failed';
     let showRetryButton = false;
     
-    switch (params.error) {
+    switch (error) {
       case 'access_denied':
         errorMessage = 'Access denied. Please allow the app to access your Spotify account.';
         showRetryButton = true;
         break;
       case 'invalid_client':
-        errorMessage = 'Invalid client configuration. Please contact the developer.';
+        errorMessage = 'Invalid client configuration. Please check your app settings.';
         break;
       case 'invalid_request':
         errorMessage = 'Invalid request. Please try again.';
@@ -393,11 +456,11 @@ document.addEventListener('DOMContentLoaded', () => {
         showRetryButton = true;
         break;
       case 'unsupported_response_type':
-        errorMessage = 'Your Spotify app is configured for a different response type. Please create a new app with Web App type.';
+        errorMessage = 'Using modern Authorization Code flow with PKCE. Please try again.';
         showRetryButton = true;
         break;
       default:
-        errorMessage = `Authentication error: ${params.error}`;
+        errorMessage = `Authentication error: ${error}`;
         showRetryButton = true;
     }
     
@@ -406,19 +469,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (showRetryButton) {
       document.getElementById('login-btn').hidden = false;
       document.getElementById('login-btn').textContent = 'Try Again';
-      document.getElementById('login-btn').onclick = () => {
-        if (params.error === 'unsupported_response_type') {
-          loginWithSpotifyFallback();
-        } else {
-          loginWithSpotify();
-        }
-      };
+      document.getElementById('login-btn').onclick = loginWithSpotify;
     } else {
       document.getElementById('login-btn').hidden = false;
       document.getElementById('login-btn').onclick = loginWithSpotify;
     }
   } else {
-    // No token, show login button
+    // No token or code, show login button
     updateStatus('Please login to Spotify to start playing music');
     document.getElementById('login-btn').onclick = loginWithSpotify;
   }
@@ -483,5 +540,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   // Test auth button
-  document.getElementById('test-auth-btn').onclick = testSpotifyAuth;
+  document.getElementById('test-auth-btn').onclick = async () => {
+    // Initialize PKCE values for testing
+    codeVerifier = generateCodeVerifier(128);
+    codeChallenge = await generateCodeChallenge(codeVerifier);
+    testSpotifyAuth();
+  };
 }); 
