@@ -96,6 +96,19 @@ function getQueryParams() {
   return params;
 }
 
+// Store the access token in localStorage for persistent login
+function saveSpotifyToken(token) {
+  localStorage.setItem('spotify_access_token', token);
+}
+
+function getSavedSpotifyToken() {
+  return localStorage.getItem('spotify_access_token');
+}
+
+function clearSpotifyToken() {
+  localStorage.removeItem('spotify_access_token');
+}
+
 async function loginWithSpotify() {
   // Clear any existing errors
   updateStatus('Preparing Spotify authentication...');
@@ -164,6 +177,7 @@ async function exchangeCodeForToken(code) {
     
     // Store the access token
     accessToken = data.access_token;
+    saveSpotifyToken(accessToken);
     
     // Clean up session storage
     sessionStorage.removeItem('spotify_code_verifier');
@@ -447,13 +461,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('URL query params:', queryParams);
   console.log('Current URL:', window.location.href);
   
-  if (params.access_token) {
+  // Check for saved token first
+  const savedToken = getSavedSpotifyToken();
+  if (savedToken) {
+    accessToken = savedToken;
+    document.getElementById('login-btn').hidden = true;
+    updateStatus('Welcome back! Setting up Spotify player...');
+    setupPlayer();
+  } else if (params.access_token) {
     // Handle legacy implicit flow (if somehow still working)
     accessToken = params.access_token;
     console.log('Access token received (implicit flow), length:', accessToken.length);
     document.getElementById('login-btn').hidden = true;
     updateStatus('Authentication successful! Setting up player...');
     setupPlayer();
+    saveSpotifyToken(accessToken);
   } else if (queryParams.code) {
     // Handle authorization code flow (modern approach)
     try {
@@ -469,6 +491,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
+      
+      saveSpotifyToken(token);
       
     } catch (error) {
       console.error('Token exchange failed:', error);
@@ -621,4 +645,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('beforeunload', () => {
     stopSeekBarTimer();
   });
+  
+  // Add logout button functionality
+  if (!document.getElementById('logout-btn')) {
+    const logoutBtn = document.createElement('button');
+    logoutBtn.id = 'logout-btn';
+    logoutBtn.textContent = 'Logout from Spotify';
+    logoutBtn.style.marginTop = '10px';
+    logoutBtn.style.background = '#888';
+    logoutBtn.style.color = '#fff';
+    logoutBtn.style.border = 'none';
+    logoutBtn.style.borderRadius = '20px';
+    logoutBtn.style.padding = '10px 20px';
+    logoutBtn.style.cursor = 'pointer';
+    logoutBtn.style.fontSize = '14px';
+    document.querySelector('.player-info').appendChild(logoutBtn);
+    logoutBtn.onclick = () => {
+      clearSpotifyToken();
+      accessToken = null;
+      updateStatus('Logged out. Please login to Spotify to start playing music');
+      document.getElementById('login-btn').hidden = false;
+      if (player && player.disconnect) player.disconnect();
+    };
+  }
 }); 
