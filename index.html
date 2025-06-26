@@ -452,7 +452,7 @@
 
     // Spotify Auth and Player Logic
     const clientId = '63e73b8c9c864c2aa1651fd956b0a08f';
-    const redirectUri = window.location.origin + window.location.pathname;
+    const redirectUri = 'https://mytoolengine.netlify.app/';
     const scopes = [
       'streaming',
       'user-read-email',
@@ -463,6 +463,7 @@
       'playlist-read-collaborative',
     ];
     let player, deviceId, accessToken;
+    
     function getHashParams() {
       const hash = window.location.hash.substring(1);
       const params = {};
@@ -472,10 +473,21 @@
       });
       return params;
     }
+    
     function loginWithSpotify() {
+      // Clear any existing errors
+      updateStatus('Redirecting to Spotify...');
+      
       const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&show_dialog=true`;
-      window.location = url;
+      
+      try {
+        window.location = url;
+      } catch (error) {
+        console.error('Error redirecting to Spotify:', error);
+        updateStatus('Failed to redirect to Spotify. Please try again.', true);
+      }
     }
+
     function msToTime(ms) {
       const min = Math.floor(ms / 60000);
       const sec = Math.floor((ms % 60000) / 1000);
@@ -661,11 +673,47 @@
     
     document.addEventListener('DOMContentLoaded', () => {
       const params = getHashParams();
+      
+      // Debug: Log the URL parameters
+      console.log('URL hash params:', params);
+      console.log('Current URL:', window.location.href);
+      
       if (params.access_token) {
         accessToken = params.access_token;
+        console.log('Access token received, length:', accessToken.length);
         document.getElementById('login-btn').hidden = true;
+        updateStatus('Authentication successful! Setting up player...');
         setupPlayer();
+      } else if (params.error) {
+        // Handle authentication errors
+        console.error('Spotify auth error:', params.error);
+        let errorMessage = 'Authentication failed';
+        
+        switch (params.error) {
+          case 'access_denied':
+            errorMessage = 'Access denied. Please allow the app to access your Spotify account.';
+            break;
+          case 'invalid_client':
+            errorMessage = 'Invalid client configuration. Please contact the developer.';
+            break;
+          case 'invalid_request':
+            errorMessage = 'Invalid request. Please try again.';
+            break;
+          case 'server_error':
+            errorMessage = 'Spotify server error. Please try again later.';
+            break;
+          case 'temporarily_unavailable':
+            errorMessage = 'Spotify service temporarily unavailable. Please try again later.';
+            break;
+          default:
+            errorMessage = `Authentication error: ${params.error}`;
+        }
+        
+        updateStatus(errorMessage, true);
+        document.getElementById('login-btn').hidden = false;
       } else {
+        // No token, show login button
+        updateStatus('Please login to Spotify to start playing music');
         document.getElementById('login-btn').onclick = loginWithSpotify;
       }
       
