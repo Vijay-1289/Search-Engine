@@ -464,6 +464,14 @@
     ];
     let player, deviceId, accessToken;
     
+    // Define the callback before the SDK loads
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      console.log('Spotify Web Playback SDK is ready');
+      if (accessToken) {
+        setupPlayer();
+      }
+    };
+    
     function getHashParams() {
       const hash = window.location.hash.substring(1);
       const params = {};
@@ -488,14 +496,33 @@
       // Clear any existing errors
       updateStatus('Redirecting to Spotify...');
       
-      // Use implicit flow (token response type)
-      const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&show_dialog=true`;
+      // Try both response types to handle different app configurations
+      const responseType = 'token'; // Use token for implicit flow
+      const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&show_dialog=true`;
+      
+      console.log('Redirecting to Spotify with URL:', url);
       
       try {
         window.location = url;
       } catch (error) {
         console.error('Error redirecting to Spotify:', error);
         updateStatus('Failed to redirect to Spotify. Please try again.', true);
+      }
+    }
+    
+    function loginWithSpotifyAlternative() {
+      // Alternative login method with different parameters
+      updateStatus('Trying alternative login method...');
+      
+      const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=token&state=123&show_dialog=true`;
+      
+      console.log('Alternative login URL:', url);
+      
+      try {
+        window.location = url;
+      } catch (error) {
+        console.error('Error with alternative login:', error);
+        updateStatus('Alternative login failed. Please check your Spotify app settings.', true);
       }
     }
     
@@ -553,84 +580,95 @@
     }
     
     function setupPlayer() {
-      window.onSpotifyWebPlaybackSDKReady = () => {
-        updateStatus('Connecting to Spotify...');
+      if (!accessToken) {
+        console.error('No access token available');
+        updateStatus('No access token available', true);
+        return;
+      }
+      
+      updateStatus('Connecting to Spotify...');
+      
+      // Check if SDK is already loaded
+      if (typeof Spotify === 'undefined') {
+        console.error('Spotify Web Playback SDK not loaded');
+        updateStatus('Spotify SDK not loaded. Please refresh the page.', true);
+        return;
+      }
+      
+      player = new Spotify.Player({
+        name: 'Web Player',
+        getOAuthToken: cb => { cb(accessToken); },
+        volume: 0.5
+      });
+      
+      player.addListener('ready', ({ device_id }) => {
+        console.log('Player ready with device ID:', device_id);
+        deviceId = device_id;
+        updateStatus('Connected! Ready to play music.');
         
-        player = new Spotify.Player({
-          name: 'Web Player',
-          getOAuthToken: cb => { cb(accessToken); },
-          volume: 0.5
-        });
-        
-        player.addListener('ready', ({ device_id }) => {
-          console.log('Player ready with device ID:', device_id);
-          deviceId = device_id;
-          updateStatus('Connected! Ready to play music.');
-          
-          // Transfer playback to this device
-          fetch('https://api.spotify.com/v1/me/player', {
-            method: 'PUT',
-            headers: { 
-              'Authorization': 'Bearer ' + accessToken, 
-              'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ 
-              device_ids: [deviceId], 
-              play: false 
-            })
-          }).then(response => {
-            if (!response.ok) {
-              console.error('Failed to transfer playback:', response.status);
-            }
-          }).catch(error => {
-            console.error('Error transferring playback:', error);
-          });
-        });
-        
-        player.addListener('not_ready', ({ device_id }) => {
-          console.log('Device ID has gone offline', device_id);
-          updateStatus('Player disconnected', true);
-        });
-        
-        player.addListener('initialization_error', ({ message }) => {
-          console.error('Failed to initialize player:', message);
-          updateStatus('Failed to initialize player', true);
-        });
-        
-        player.addListener('authentication_error', ({ message }) => {
-          console.error('Failed to authenticate:', message);
-          updateStatus('Authentication failed. Please login again.', true);
-          // Re-login if authentication fails
-          setTimeout(() => loginWithSpotify(), 2000);
-        });
-        
-        player.addListener('account_error', ({ message }) => {
-          console.error('Failed to validate Spotify account:', message);
-          updateStatus('Account error. Please check your Spotify Premium status.', true);
-        });
-        
-        player.addListener('playback_error', ({ message }) => {
-          console.error('Failed to perform playback:', message);
-          updateStatus('Playback error occurred', true);
-        });
-        
-        player.addListener('player_state_changed', state => {
-          console.log('Player state changed:', state);
-          updatePlayerUI(state);
-          
-          if (state) {
-            updateStatus('Now playing');
+        // Transfer playback to this device
+        fetch('https://api.spotify.com/v1/me/player', {
+          method: 'PUT',
+          headers: { 
+            'Authorization': 'Bearer ' + accessToken, 
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ 
+            device_ids: [deviceId], 
+            play: false 
+          })
+        }).then(response => {
+          if (!response.ok) {
+            console.error('Failed to transfer playback:', response.status);
           }
+        }).catch(error => {
+          console.error('Error transferring playback:', error);
         });
+      });
+      
+      player.addListener('not_ready', ({ device_id }) => {
+        console.log('Device ID has gone offline', device_id);
+        updateStatus('Player disconnected', true);
+      });
+      
+      player.addListener('initialization_error', ({ message }) => {
+        console.error('Failed to initialize player:', message);
+        updateStatus('Failed to initialize player', true);
+      });
+      
+      player.addListener('authentication_error', ({ message }) => {
+        console.error('Failed to authenticate:', message);
+        updateStatus('Authentication failed. Please login again.', true);
+        // Re-login if authentication fails
+        setTimeout(() => loginWithSpotify(), 2000);
+      });
+      
+      player.addListener('account_error', ({ message }) => {
+        console.error('Failed to validate Spotify account:', message);
+        updateStatus('Account error. Please check your Spotify Premium status.', true);
+      });
+      
+      player.addListener('playback_error', ({ message }) => {
+        console.error('Failed to perform playback:', message);
+        updateStatus('Playback error occurred', true);
+      });
+      
+      player.addListener('player_state_changed', state => {
+        console.log('Player state changed:', state);
+        updatePlayerUI(state);
         
-        player.connect().then(success => {
-          if (success) {
-            console.log('Successfully connected to Spotify!');
-          } else {
-            updateStatus('Failed to connect to Spotify', true);
-          }
-        });
-      };
+        if (state) {
+          updateStatus('Now playing');
+        }
+      });
+      
+      player.connect().then(success => {
+        if (success) {
+          console.log('Successfully connected to Spotify!');
+        } else {
+          updateStatus('Failed to connect to Spotify', true);
+        }
+      });
     }
     
     function loadPlaylist(playlistId) {
@@ -699,29 +737,53 @@
         // Handle authentication errors
         console.error('Spotify auth error:', params.error);
         let errorMessage = 'Authentication failed';
+        let showRetryButton = false;
         
         switch (params.error) {
           case 'access_denied':
             errorMessage = 'Access denied. Please allow the app to access your Spotify account.';
+            showRetryButton = true;
             break;
           case 'invalid_client':
             errorMessage = 'Invalid client configuration. Please contact the developer.';
             break;
           case 'invalid_request':
             errorMessage = 'Invalid request. Please try again.';
+            showRetryButton = true;
             break;
           case 'server_error':
             errorMessage = 'Spotify server error. Please try again later.';
+            showRetryButton = true;
             break;
           case 'temporarily_unavailable':
             errorMessage = 'Spotify service temporarily unavailable. Please try again later.';
+            showRetryButton = true;
+            break;
+          case 'unsupported_response_type':
+            errorMessage = 'Your Spotify app is configured for a different response type. Please update your app settings to support "token" response type.';
+            showRetryButton = true;
             break;
           default:
             errorMessage = `Authentication error: ${params.error}`;
+            showRetryButton = true;
         }
         
         updateStatus(errorMessage, true);
-        document.getElementById('login-btn').hidden = false;
+        
+        if (showRetryButton) {
+          document.getElementById('login-btn').hidden = false;
+          document.getElementById('login-btn').textContent = 'Try Again';
+          document.getElementById('login-btn').onclick = () => {
+            if (params.error === 'unsupported_response_type') {
+              loginWithSpotifyAlternative();
+            } else {
+              loginWithSpotify();
+            }
+          };
+        } else {
+          document.getElementById('login-btn').hidden = false;
+          document.getElementById('login-btn').onclick = loginWithSpotify;
+        }
       } else {
         // No token, show login button
         updateStatus('Please login to Spotify to start playing music');
