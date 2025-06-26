@@ -41,6 +41,8 @@ const scopes = [
   'playlist-read-collaborative',
 ];
 let player, deviceId, accessToken;
+let seekBarUpdateTimer = null; // Timer for updating seek bar
+let currentTrackDuration = 0; // Store current track duration
 
 // PKCE (Proof Key for Code Exchange) functions
 function generateCodeVerifier(length) {
@@ -208,6 +210,47 @@ function updatePlayerUI(state) {
   document.getElementById('seek-bar').max = state.duration;
   document.getElementById('seek-bar').value = state.position;
   document.getElementById('play-btn').textContent = state.paused ? '▶️' : '⏸️';
+  
+  // Store duration for timer updates
+  currentTrackDuration = state.duration;
+  
+  // Start or stop the seek bar update timer
+  if (!state.paused && state.position > 0) {
+    startSeekBarTimer();
+  } else {
+    stopSeekBarTimer();
+  }
+}
+
+function startSeekBarTimer() {
+  // Clear existing timer
+  stopSeekBarTimer();
+  
+  // Start new timer to update seek bar every 100ms
+  seekBarUpdateTimer = setInterval(() => {
+    if (player && currentTrackDuration > 0) {
+      // Get current position from player
+      player.getCurrentState().then(state => {
+        if (state && !state.paused) {
+          const seekBar = document.getElementById('seek-bar');
+          const currentTime = document.getElementById('current-time');
+          
+          // Update seek bar position
+          seekBar.value = state.position;
+          currentTime.textContent = msToTime(state.position);
+        }
+      }).catch(error => {
+        console.error('Error getting current state:', error);
+      });
+    }
+  }, 100); // Update every 100ms for smooth movement
+}
+
+function stopSeekBarTimer() {
+  if (seekBarUpdateTimer) {
+    clearInterval(seekBarUpdateTimer);
+    seekBarUpdateTimer = null;
+  }
 }
 
 function updateStatus(message, isError = false) {
@@ -281,6 +324,7 @@ function setupPlayer() {
   player.addListener('not_ready', ({ device_id }) => {
     console.log('Device ID has gone offline', device_id);
     updateStatus('Player disconnected', true);
+    stopSeekBarTimer(); // Stop timer when player disconnects
   });
   
   player.addListener('initialization_error', ({ message }) => {
@@ -311,6 +355,10 @@ function setupPlayer() {
     
     if (state) {
       updateStatus('Now playing');
+    } else {
+      // No state means no track is playing
+      stopSeekBarTimer();
+      updateStatus('No track playing');
     }
   });
   
@@ -507,7 +555,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   document.getElementById('seek-bar').oninput = (e) => {
     if (!player) return;
-    player.seek(Number(e.target.value));
+    
+    // Pause the timer while user is dragging
+    stopSeekBarTimer();
+    
+    const newPosition = Number(e.target.value);
+    player.seek(newPosition);
+    
+    // Update the current time display immediately
+    document.getElementById('current-time').textContent = msToTime(newPosition);
+  };
+  
+  // Resume timer when user finishes dragging
+  document.getElementById('seek-bar').onchange = () => {
+    if (player) {
+      // Small delay to ensure seek operation completes
+      setTimeout(() => {
+        player.getCurrentState().then(state => {
+          if (state && !state.paused) {
+            startSeekBarTimer();
+          }
+        });
+      }, 100);
+    }
   };
   
   // Playlist loading
@@ -546,4 +616,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     codeChallenge = await generateCodeChallenge(codeVerifier);
     testSpotifyAuth();
   };
+  
+  // Cleanup timer when page is unloaded
+  window.addEventListener('beforeunload', () => {
+    stopSeekBarTimer();
+  });
 }); 
