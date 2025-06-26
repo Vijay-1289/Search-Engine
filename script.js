@@ -34,7 +34,7 @@ function openApp(url) {
 // - Redirect URI: "https://mytoolengine.netlify.app/"
 // - App type: "Web App"
 const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec'; // Your new Spotify Client ID (Web App)
-const redirectUri = 'https://mytoolengine.netlify.app/';
+const redirectUri = 'https://mytoolengine.netlify.app/'; // Make sure this matches your app settings
 const scopes = [
   'streaming',
   'user-read-email',
@@ -82,7 +82,12 @@ function loginWithSpotify() {
   const responseType = 'token'; // Use token for implicit flow
   const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&show_dialog=true`;
   
-  console.log('Redirecting to Spotify with URL:', url);
+  console.log('=== SPOTIFY AUTH DEBUG ===');
+  console.log('Client ID:', clientId);
+  console.log('Redirect URI:', redirectUri);
+  console.log('Response Type:', responseType);
+  console.log('Full URL:', url);
+  console.log('========================');
   
   try {
     window.location = url;
@@ -331,6 +336,22 @@ function loadPlaylist(playlistId) {
   });
 }
 
+function testSpotifyAuth() {
+  // Test function to check if the auth URL is valid
+  const responseType = 'token';
+  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&show_dialog=true`;
+  
+  console.log('=== AUTH URL TEST ===');
+  console.log('URL:', url);
+  console.log('URL Length:', url.length);
+  console.log('Client ID Valid:', /^[a-f0-9]{32}$/.test(clientId));
+  console.log('Redirect URI Valid:', redirectUri.startsWith('https://'));
+  console.log('=====================');
+  
+  // Open URL in new tab for testing
+  window.open(url, '_blank');
+}
+
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   const params = getHashParams();
@@ -460,4 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('spotify-url-btn').click();
     }
   });
+  
+  // Test auth button
+  document.getElementById('test-auth-btn').onclick = testSpotifyAuth;
 }); 
