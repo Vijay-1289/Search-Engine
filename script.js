@@ -33,7 +33,7 @@ function openApp(url) {
 // - App name: "My Tool Engine Player"
 // - Redirect URI: "https://mytoolengine.netlify.app/"
 // - App type: "Web App"
-const clientId = '63e73b8c9c864c2aa1651fd956b0a08f'; // Your Spotify Client ID
+const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec'; // Your new Spotify Client ID (Web App)
 const redirectUri = 'https://mytoolengine.netlify.app/';
 const scopes = [
   'streaming',
