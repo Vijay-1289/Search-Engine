@@ -485,7 +485,7 @@ document.addEventListener('DOMContentLoaded', function() {
   
   if (code) {
     console.log('Auth code received, exchanging for tokens...');
-    exchangeCodeForTokens(code);
+    exchangeCodeForToken(code);
   } else {
     // Check for existing tokens
     const existingToken = sessionStorage.getItem('spotify_access_token');
@@ -717,13 +717,6 @@ async function updateDeviceList() {
 // In initialization, after setupPlayer():
 // setTimeout(() => updateDeviceList(), 1200);
 // Also call updateDeviceList when user clicks refresh devices
-
-// In exchangeCodeForTokens, after setupPlayer(), call updateDeviceList
-const originalExchangeCodeForTokens = exchangeCodeForTokens;
-exchangeCodeForTokens = async function(code) {
-  await originalExchangeCodeForTokens.apply(this, arguments);
-  setTimeout(() => updateDeviceList(), 1200);
-};
 
 // --- Playlist Management Functions ---
 async function fetchUserPlaylists() {
@@ -1158,7 +1151,7 @@ document.addEventListener('DOMContentLoaded', function() {
   
   if (code) {
     console.log('Auth code received, exchanging for tokens...');
-    exchangeCodeForTokens(code);
+    exchangeCodeForToken(code);
   } else {
     // Check for existing tokens
     const existingToken = sessionStorage.getItem('spotify_access_token');
