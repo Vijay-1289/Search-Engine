@@ -32,8 +32,12 @@ function openApp(url) {
 const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec';
 const redirectUri = 'https://mytoolengine.netlify.app/';
 const scopes = [
+  'streaming',
   'user-read-email',
   'user-read-private',
+  'user-modify-playback-state',
+  'user-read-playback-state',
+  'user-read-currently-playing',
   'playlist-read-private',
   'playlist-read-collaborative',
   'user-read-recently-played',
@@ -366,14 +370,40 @@ function animateGlossyEqBars(isPlaying) {
 
 // --- Update player UI to use glossy eq bars ---
 function updatePlayerUI(state) {
-  // For free accounts, we don't have playback state
-  document.getElementById('player-title').textContent = 'Spotify Music Browser (Free Account)';
-  document.getElementById('current-time').textContent = '--:--';
-  document.getElementById('duration').textContent = '--:--';
-  document.getElementById('seek-bar').value = 0;
-  document.getElementById('seek-bar').max = 100;
-  animateGlossyEqBars(false);
-  updateSeekBarProgress(0, 100);
+  if (!state) {
+    document.getElementById('player-title').textContent = 'Spotify Music Player';
+    document.getElementById('current-time').textContent = '00:00';
+    document.getElementById('duration').textContent = '00:00';
+    document.getElementById('seek-bar').value = 0;
+    document.getElementById('seek-bar').max = 100;
+    animateGlossyEqBars(false);
+    updateSeekBarProgress(0, 100);
+    return;
+  }
+  const track = state.track_window.current_track;
+  const position = state.position;
+  const duration = track.duration_ms;
+  
+  // Update current track ID
+  currentTrackId = track.id;
+  
+  document.getElementById('player-title').textContent = track.name;
+  const artwork = document.getElementById('player-artwork');
+  if (track.album.images.length > 0) artwork.src = track.album.images[0].url;
+  document.getElementById('current-time').textContent = msToTime(position);
+  document.getElementById('duration').textContent = msToTime(duration);
+  const seekBar = document.getElementById('seek-bar');
+  seekBar.max = duration;
+  seekBar.value = position;
+  animateGlossyEqBars(!state.paused);
+  updateSeekBarProgress(position, duration);
+  const playBtn = document.getElementById('play-btn');
+  playBtn.textContent = state.paused ? '▶️' : '⏸️';
+  if (!state.paused) {
+    startSeekBarTimer();
+  } else {
+    stopSeekBarTimer();
+  }
 }
 
 function startSeekBarTimer() {
@@ -719,30 +749,61 @@ async function getSimilarSongs(trackId) {
 }
 
 async function playSong(trackUri) {
-  // For free accounts, we can't control playback directly
-  // Instead, we'll show the track info and provide a link to open in Spotify
+  if (!deviceId) {
+    updateStatus('Please wait for the player to be ready, then try again.', true);
+    return;
+  }
+
   try {
-    updateStatus('Free account detected - opening track in Spotify...');
+    updateStatus('Playing song...');
+
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        uris: [trackUri]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    updateStatus('Song started playing!');
     
-    // Extract track ID from URI
+    // Extract track ID from URI and initialize similar songs queue
     const trackId = trackUri.split(':').pop();
     currentTrackId = trackId;
     
-    // Open the track in Spotify
-    const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
-    window.open(spotifyUrl, '_blank');
-    
-    updateStatus('Track opened in Spotify! (Free accounts can\'t control playback directly)');
+    // Get similar songs for the queue
+    setTimeout(async () => {
+      const similarSongs = await getSimilarSongsForQueue(trackId);
+      similarSongsQueue = similarSongs;
+      console.log(`Added ${similarSongs.length} similar songs to queue`);
+      updateStatus(`Added ${similarSongs.length} similar songs to auto-play queue!`);
+    }, 2000);
     
     // Hide search results and return to player view
     setTimeout(() => {
       showSearchResults(false);
-      updateStatus('Track opened in Spotify. Enjoy listening!');
+      updateStatus('Now playing - similar songs will auto-play next!');
     }, 1000);
 
   } catch (error) {
-    console.error('Error handling song:', error);
-    updateStatus('Failed to open track. Please try again.', true);
+    console.error('Error playing song:', error);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else if (error.message === 'Insufficient permissions') {
+      // Fallback for free accounts - open in Spotify
+      updateStatus('Opening track in Spotify (free account limitation)...');
+      const trackId = trackUri.split(':').pop();
+      const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+      window.open(spotifyUrl, '_blank');
+    } else {
+      updateStatus('Failed to play song. Please try again.', true);
+    }
   }
 }
 
@@ -1011,23 +1072,46 @@ function displayUserPlaylists(playlists) {
 }
 
 async function playPlaylist(playlistUri) {
-  // For free accounts, we can't control playback directly
-  // Instead, we'll open the playlist in Spotify
+  if (!deviceId) {
+    updateStatus('Please wait for the player to be ready, then try again.', true);
+    return;
+  }
+
   try {
-    updateStatus('Free account detected - opening playlist in Spotify...');
+    updateStatus('Loading playlist...');
+
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        context_uri: playlistUri
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    updateStatus('Playlist started playing!');
     
-    // Extract playlist ID from URI
-    const playlistId = playlistUri.split(':').pop();
-    
-    // Open the playlist in Spotify
-    const spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
-    window.open(spotifyUrl, '_blank');
-    
-    updateStatus('Playlist opened in Spotify! (Free accounts can\'t control playback directly)');
+    // Clear the similar songs queue since we're playing from a playlist
+    clearSimilarSongsQueue();
 
   } catch (error) {
-    console.error('Error handling playlist:', error);
-    updateStatus('Failed to open playlist. Please try again.', true);
+    console.error('Error playing playlist:', error);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else if (error.message === 'Insufficient permissions') {
+      // Fallback for free accounts - open in Spotify
+      updateStatus('Opening playlist in Spotify (free account limitation)...');
+      const playlistId = playlistUri.split(':').pop();
+      const spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
+      window.open(spotifyUrl, '_blank');
+    } else {
+      updateStatus('Failed to play playlist. Please try again.', true);
+    }
   }
 }
 
@@ -1175,7 +1259,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       accessToken = savedToken;
       document.getElementById('login-btn').hidden = true;
       document.getElementById('switch-account-btn').hidden = false;
-      updateStatus('Welcome back! You can search for songs and browse playlists.');
+      updateStatus('Welcome back! You can now search for songs and discover similar music.');
+      setupPlayer();
       // Load user's playlists
       setTimeout(() => fetchUserPlaylists(), 1000);
       // Display current user info
@@ -1201,7 +1286,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('Access token received (implicit flow), length:', accessToken.length);
     document.getElementById('login-btn').hidden = true;
     document.getElementById('switch-account-btn').hidden = false;
-    updateStatus('Authentication successful! You can search for songs and browse playlists.');
+    updateStatus('Authentication successful! You can now search for songs and discover similar music.');
+    setupPlayer();
     saveSpotifyToken(accessToken);
     // Load user's playlists
     setTimeout(() => fetchUserPlaylists(), 1000);
@@ -1218,7 +1304,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       document.getElementById('login-btn').hidden = true;
       document.getElementById('switch-account-btn').hidden = false;
-      updateStatus('Authentication successful! You can search for songs and browse playlists.');
+      updateStatus('Authentication successful! You can now search for songs and discover similar music.');
+      setupPlayer();
       
       // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -1288,30 +1375,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } else {
     // No token or code, show login button
-    updateStatus('Please login to Spotify to search for songs and browse playlists');
+    updateStatus('Please login to Spotify to search for songs and discover similar music');
     document.getElementById('login-btn').onclick = loginWithSpotify;
   }
   
   // Player control event listeners
   document.getElementById('play-btn').onclick = () => {
-    updateStatus('Playback controls not available with free account. Tracks will open in Spotify.', true);
+    if (!player) {
+      alert('Please login to Spotify first');
+      return;
+    }
+    player.togglePlay();
   };
   
   document.getElementById('prev-btn').onclick = () => {
-    updateStatus('Playback controls not available with free account. Tracks will open in Spotify.', true);
+    if (!player) {
+      alert('Please login to Spotify first');
+      return;
+    }
+    player.previousTrack();
   };
   
   document.getElementById('next-btn').onclick = () => {
-    updateStatus('Playback controls not available with free account. Tracks will open in Spotify.', true);
+    if (!player) {
+      alert('Please login to Spotify first');
+      return;
+    }
+    player.nextTrack();
   };
   
   document.getElementById('seek-bar').oninput = (e) => {
-    updateStatus('Seek controls not available with free account. Tracks will open in Spotify.', true);
+    if (!player) return;
+    
+    // Pause the timer while user is dragging
+    stopSeekBarTimer();
+    
+    const newPosition = Number(e.target.value);
+    player.seek(newPosition);
+    
+    // Update the current time display immediately
+    document.getElementById('current-time').textContent = msToTime(newPosition);
   };
   
   // Resume timer when user finishes dragging
   document.getElementById('seek-bar').onchange = () => {
-    updateStatus('Seek controls not available with free account. Tracks will open in Spotify.', true);
+    if (player) {
+      // Small delay to ensure seek operation completes
+      setTimeout(() => {
+        player.getCurrentState().then(state => {
+          if (state && !state.paused) {
+            startSeekBarTimer();
+          }
+        });
+      }, 100);
+    }
   };
   
   // Song search functionality
