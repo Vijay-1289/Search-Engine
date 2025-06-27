@@ -45,6 +45,7 @@ const scopes = [
 let player, deviceId, accessToken;
 let seekBarUpdateTimer = null; // Timer for updating seek bar
 let currentTrackDuration = 0; // Store current track duration
+let isConnecting = false; // Prevent multiple connection attempts
 
 // PKCE (Proof Key for Code Exchange) functions
 function generateCodeVerifier(length) {
@@ -73,7 +74,7 @@ let codeChallenge = '';
 // Define the callback before the SDK loads
 window.onSpotifyWebPlaybackSDKReady = () => {
   console.log('Spotify Web Playback SDK is ready');
-  if (accessToken) {
+  if (accessToken && !player && !isConnecting) {
     setupPlayer();
   }
 };
@@ -109,6 +110,46 @@ function getSavedSpotifyToken() {
 
 function clearSpotifyToken() {
   localStorage.removeItem('spotify_access_token');
+}
+
+async function checkTokenValidity(token) {
+  try {
+    const response = await fetch('https://api.spotify.com/v1/me', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Error checking token validity:', error);
+    return false;
+  }
+}
+
+async function makeSpotifyRequest(url, options = {}) {
+  if (!accessToken) {
+    throw new Error('No access token available');
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      ...options.headers
+    }
+  });
+
+  if (response.status === 401) {
+    // Token expired, clear it and throw error
+    clearSpotifyToken();
+    accessToken = null;
+    player = null;
+    document.getElementById('login-btn').hidden = false;
+    updateStatus('Session expired. Please login again.', true);
+    throw new Error('Authentication expired');
+  }
+
+  return response;
 }
 
 async function loginWithSpotify() {
@@ -297,12 +338,20 @@ function setupPlayer() {
     return;
   }
   
+  // Prevent multiple setup attempts
+  if (player || isConnecting) {
+    console.log('Player already exists or connecting, skipping setup');
+    return;
+  }
+  
+  isConnecting = true;
   updateStatus('Connecting to Spotify...');
   
   // Check if SDK is already loaded
   if (typeof Spotify === 'undefined') {
     console.error('Spotify Web Playback SDK not loaded');
     updateStatus('Spotify SDK not loaded. Please refresh the page.', true);
+    isConnecting = false;
     return;
   }
   
@@ -318,11 +367,10 @@ function setupPlayer() {
     updateStatus('Connected! Ready to play music.');
     
     // Transfer playback to this device
-    fetch('https://api.spotify.com/v1/me/player', {
+    makeSpotifyRequest('https://api.spotify.com/v1/me/player', {
       method: 'PUT',
-      headers: { 
-        'Authorization': 'Bearer ' + accessToken, 
-        'Content-Type': 'application/json' 
+      headers: {
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ 
         device_ids: [deviceId], 
@@ -346,18 +394,23 @@ function setupPlayer() {
   player.addListener('initialization_error', ({ message }) => {
     console.error('Failed to initialize player:', message);
     updateStatus('Failed to initialize player', true);
+    player = null; // Reset player on initialization error
   });
   
   player.addListener('authentication_error', ({ message }) => {
     console.error('Failed to authenticate:', message);
     updateStatus('Authentication failed. Please login again.', true);
-    // Re-login if authentication fails
-    setTimeout(() => loginWithSpotify(), 2000);
+    player = null; // Reset player on auth error
+    // Clear token and show login button
+    clearSpotifyToken();
+    accessToken = null;
+    document.getElementById('login-btn').hidden = false;
   });
   
   player.addListener('account_error', ({ message }) => {
     console.error('Failed to validate Spotify account:', message);
     updateStatus('Account error. Please check your Spotify Premium status.', true);
+    player = null; // Reset player on account error
   });
   
   player.addListener('playback_error', ({ message }) => {
@@ -382,10 +435,16 @@ function setupPlayer() {
     if (success) {
       console.log('Successfully connected to Spotify!');
       updateStatus('Welcome back! You can now search for songs and discover similar music.');
-      setupPlayer();
     } else {
       updateStatus('Failed to connect to Spotify', true);
+      player = null; // Reset player on connection failure
     }
+  }).catch(error => {
+    console.error('Connection error:', error);
+    updateStatus('Connection failed. Please try again.', true);
+    player = null; // Reset player on connection error
+  }).finally(() => {
+    isConnecting = false;
   });
 }
 
@@ -401,11 +460,10 @@ function loadPlaylist(playlistId) {
   updateStatus('Loading playlist...');
   
   // First, transfer playback to our device
-  fetch('https://api.spotify.com/v1/me/player', {
+  makeSpotifyRequest('https://api.spotify.com/v1/me/player', {
     method: 'PUT',
-    headers: { 
-      'Authorization': 'Bearer ' + accessToken, 
-      'Content-Type': 'application/json' 
+    headers: {
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({ 
       device_ids: [deviceId], 
@@ -413,11 +471,10 @@ function loadPlaylist(playlistId) {
     })
   }).then(() => {
     // Then start playing the playlist
-    return fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+    return makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
       method: 'PUT',
-      headers: { 
-        'Authorization': 'Bearer ' + accessToken, 
-        'Content-Type': 'application/json' 
+      headers: {
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ 
         context_uri: `spotify:playlist:${playlistId}` 
@@ -432,7 +489,11 @@ function loadPlaylist(playlistId) {
     document.getElementById('player-title').textContent = 'Loading playlist...';
   }).catch(error => {
     console.error('Error loading playlist:', error);
-    updateStatus('Failed to load playlist. Please check the URL.', true);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to load playlist. Please check the URL.', true);
+    }
   }).finally(() => {
     showLoading(false);
   });
@@ -453,11 +514,7 @@ async function searchSongs(query) {
     document.getElementById('search-results').innerHTML = '';
     document.getElementById('similar-songs').innerHTML = '';
 
-    const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -469,7 +526,11 @@ async function searchSongs(query) {
 
   } catch (error) {
     console.error('Error searching songs:', error);
-    updateStatus('Failed to search songs. Please try again.', true);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to search songs. Please try again.', true);
+    }
   } finally {
     showSearchLoading(false);
   }
@@ -485,11 +546,7 @@ async function getSimilarSongs(trackId) {
     updateStatus('Finding similar songs...');
 
     // Get track audio features first
-    const featuresResponse = await fetch(`https://api.spotify.com/v1/audio-features/${trackId}`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
+    const featuresResponse = await makeSpotifyRequest(`https://api.spotify.com/v1/audio-features/${trackId}`);
 
     if (!featuresResponse.ok) {
       throw new Error(`HTTP ${featuresResponse.status}: ${featuresResponse.statusText}`);
@@ -498,13 +555,8 @@ async function getSimilarSongs(trackId) {
     const features = await featuresResponse.json();
 
     // Get recommendations based on the track
-    const recommendationsResponse = await fetch(
-      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      }
+    const recommendationsResponse = await makeSpotifyRequest(
+      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`
     );
 
     if (!recommendationsResponse.ok) {
@@ -517,7 +569,11 @@ async function getSimilarSongs(trackId) {
 
   } catch (error) {
     console.error('Error getting similar songs:', error);
-    updateStatus('Failed to get similar songs. Please try again.', true);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to get similar songs. Please try again.', true);
+    }
   }
 }
 
@@ -530,10 +586,9 @@ async function playSong(trackUri) {
   try {
     updateStatus('Playing song...');
 
-    const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -549,7 +604,11 @@ async function playSong(trackUri) {
 
   } catch (error) {
     console.error('Error playing song:', error);
-    updateStatus('Failed to play song. Please try again.', true);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to play song. Please try again.', true);
+    }
   }
 }
 
@@ -646,10 +705,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Check for saved token first
   const savedToken = getSavedSpotifyToken();
   if (savedToken) {
-    accessToken = savedToken;
-    document.getElementById('login-btn').hidden = true;
-    updateStatus('Welcome back! Setting up Spotify player...');
-    setupPlayer();
+    // Check if the saved token is still valid
+    const isValid = await checkTokenValidity(savedToken);
+    if (isValid) {
+      accessToken = savedToken;
+      document.getElementById('login-btn').hidden = true;
+      updateStatus('Welcome back! You can now search for songs and discover similar music.');
+      setupPlayer();
+    } else {
+      // Token is expired, clear it and show login button
+      clearSpotifyToken();
+      updateStatus('Session expired. Please login again.');
+      document.getElementById('login-btn').onclick = loginWithSpotify;
+    }
   } else if (params.access_token) {
     // Handle legacy implicit flow (if somehow still working)
     accessToken = params.access_token;
