@@ -57,6 +57,17 @@
     <!-- Sidebar Spotify Player (Right Side) -->
     <aside class="sidebar-player">
       <div class="spotify-player-custom" id="spotify-player-custom">
+        <!-- Playlist Selection Section -->
+        <div class="playlist-section">
+          <div class="playlist-header">
+            <h3>Your Spotify Playlists</h3>
+            <button id="refresh-playlists-btn" class="refresh-btn">🔄 Refresh</button>
+          </div>
+          <div class="playlists-container" id="playlists-container">
+            <div class="loading-playlists">Loading your playlists...</div>
+          </div>
+        </div>
+        
         <!-- Song Search Section -->
         <div class="song-search-section">
           <div class="search-header">
@@ -97,6 +108,7 @@
             <button id="next-btn">⏭️</button>
           </div>
           <button id="login-btn">Login with Spotify</button>
+          <button id="switch-account-btn" style="display: none; margin-top: 10px; background: #ff6b6b; color: #fff; border: none; border-radius: 20px; padding: 10px 20px; cursor: pointer; font-size: 14px;">Switch Account</button>
           <button id="test-auth-btn" style="margin-top: 10px; background: #ff6b6b; color: #fff; border: none; border-radius: 20px; padding: 10px 20px; cursor: pointer; font-size: 14px;">Test Auth</button>
         </div>
       </div>

@@ -188,6 +188,47 @@ async function loginWithSpotify() {
   }
 }
 
+async function switchSpotifyAccount() {
+  // Clear current session
+  clearSpotifyToken();
+  clearSimilarSongsQueue();
+  accessToken = null;
+  currentTrackId = null;
+  
+  // Disconnect current player
+  if (player && player.disconnect) {
+    player.disconnect();
+    player = null;
+  }
+  
+  // Stop any timers
+  stopSeekBarTimer();
+  if (glossyEqAnimTimer) {
+    clearInterval(glossyEqAnimTimer);
+    glossyEqAnimTimer = null;
+  }
+  
+  // Reset UI
+  document.getElementById('login-btn').hidden = false;
+  document.getElementById('switch-account-btn').hidden = true;
+  document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading your playlists...</div>';
+  
+  // Clear search results
+  showSearchResults(false);
+  
+  // Reset player UI
+  document.getElementById('player-title').textContent = 'Spotify Music Player';
+  document.getElementById('current-time').textContent = '00:00';
+  document.getElementById('duration').textContent = '00:00';
+  document.getElementById('seek-bar').value = 0;
+  animateGlossyEqBars(false);
+  
+  updateStatus('Account switched. Please login with your new Spotify account.');
+  
+  // Start new authentication flow
+  await loginWithSpotify();
+}
+
 async function exchangeCodeForToken(code) {
   try {
     updateStatus('Exchanging authorization code for token...');
@@ -497,6 +538,11 @@ function setupPlayer() {
     if (success) {
       console.log('Successfully connected to Spotify!');
       updateStatus('Welcome back! You can now search for songs and discover similar music.');
+      setupPlayer();
+      // Load user's playlists
+      setTimeout(() => fetchUserPlaylists(), 1000);
+      // Display current user info
+      setTimeout(() => displayCurrentUser(), 1500);
     } else {
       updateStatus('Failed to connect to Spotify', true);
       player = null; // Reset player on connection failure
@@ -896,6 +942,122 @@ function getQueueStatus() {
   };
 }
 
+// --- Playlist Management Functions ---
+async function fetchUserPlaylists() {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    updateStatus('Loading your playlists...');
+    
+    // Fetch user's playlists (limit to 20 for performance)
+    const response = await makeSpotifyRequest('https://api.spotify.com/v1/me/playlists?limit=20');
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    displayUserPlaylists(data.items);
+    updateStatus(`Loaded ${data.items.length} playlists`);
+
+  } catch (error) {
+    console.error('Error fetching playlists:', error);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to load playlists. Please try again.', true);
+    }
+  }
+}
+
+function displayUserPlaylists(playlists) {
+  const container = document.getElementById('playlists-container');
+  
+  if (!playlists || playlists.length === 0) {
+    container.innerHTML = '<div class="no-playlists">No playlists found. Create some playlists in Spotify!</div>';
+    return;
+  }
+
+  const playlistsHTML = playlists.map(playlist => `
+    <div class="playlist-item">
+      <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/45x45?text=🎵'}" alt="${playlist.name}">
+      <div class="playlist-info">
+        <div class="playlist-name">${playlist.name}</div>
+        <div class="playlist-owner">by ${playlist.owner.display_name}</div>
+      </div>
+      <button class="playlist-play" onclick="playPlaylist('${playlist.uri}')" title="Play Playlist">▶️</button>
+    </div>
+  `).join('');
+
+  container.innerHTML = playlistsHTML;
+}
+
+async function playPlaylist(playlistUri) {
+  if (!deviceId) {
+    updateStatus('Please wait for the player to be ready, then try again.', true);
+    return;
+  }
+
+  try {
+    updateStatus('Loading playlist...');
+
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        context_uri: playlistUri
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    updateStatus('Playlist started playing!');
+    
+    // Clear the similar songs queue since we're playing from a playlist
+    clearSimilarSongsQueue();
+
+  } catch (error) {
+    console.error('Error playing playlist:', error);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to play playlist. Please try again.', true);
+    }
+  }
+}
+
+async function getCurrentUserProfile() {
+  if (!accessToken) return null;
+  
+  try {
+    const response = await makeSpotifyRequest('https://api.spotify.com/v1/me');
+    if (response.ok) {
+      const user = await response.json();
+      return user;
+    }
+  } catch (error) {
+    console.error('Error getting user profile:', error);
+  }
+  return null;
+}
+
+async function displayCurrentUser() {
+  const user = await getCurrentUserProfile();
+  if (user) {
+    console.log(`Logged in as: ${user.display_name} (${user.email})`);
+    // You can add UI to display the current user if needed
+    return user;
+  }
+  return null;
+}
+
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   const params = getHashParams();
@@ -914,8 +1076,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isValid) {
       accessToken = savedToken;
       document.getElementById('login-btn').hidden = true;
+      document.getElementById('switch-account-btn').hidden = false;
       updateStatus('Welcome back! You can now search for songs and discover similar music.');
       setupPlayer();
+      // Load user's playlists
+      setTimeout(() => fetchUserPlaylists(), 1000);
+      // Display current user info
+      setTimeout(() => displayCurrentUser(), 1500);
     } else {
       // Token is expired, clear it and show login button
       clearSpotifyToken();
@@ -927,9 +1094,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     accessToken = params.access_token;
     console.log('Access token received (implicit flow), length:', accessToken.length);
     document.getElementById('login-btn').hidden = true;
+    document.getElementById('switch-account-btn').hidden = false;
     updateStatus('Authentication successful! You can now search for songs and discover similar music.');
     setupPlayer();
     saveSpotifyToken(accessToken);
+    // Load user's playlists
+    setTimeout(() => fetchUserPlaylists(), 1000);
+    // Display current user info
+    setTimeout(() => displayCurrentUser(), 1500);
   } else if (queryParams.code) {
     // Handle authorization code flow (modern approach)
     try {
@@ -940,6 +1112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.log('Token exchange successful, length:', token.length);
       
       document.getElementById('login-btn').hidden = true;
+      document.getElementById('switch-account-btn').hidden = false;
       updateStatus('Authentication successful! You can now search for songs and discover similar music.');
       setupPlayer();
       
@@ -948,10 +1121,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       saveSpotifyToken(token);
       
+      // Load user's playlists
+      setTimeout(() => fetchUserPlaylists(), 1000);
+      // Display current user info
+      setTimeout(() => displayCurrentUser(), 1500);
+      
     } catch (error) {
       console.error('Token exchange failed:', error);
       updateStatus('Authentication failed. Please try again.', true);
       document.getElementById('login-btn').hidden = false;
+      document.getElementById('switch-account-btn').hidden = false;
+      document.getElementById('login-btn').textContent = 'Try Again';
       document.getElementById('login-btn').onclick = loginWithSpotify;
     }
   } else if (params.error || queryParams.error) {
@@ -994,10 +1174,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     if (showRetryButton) {
       document.getElementById('login-btn').hidden = false;
+      document.getElementById('switch-account-btn').hidden = false;
       document.getElementById('login-btn').textContent = 'Try Again';
       document.getElementById('login-btn').onclick = loginWithSpotify;
     } else {
       document.getElementById('login-btn').hidden = false;
+      document.getElementById('switch-account-btn').hidden = false;
       document.getElementById('login-btn').onclick = loginWithSpotify;
     }
   } else {
@@ -1087,6 +1269,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateStatus('Welcome back! You can now search for songs and discover similar music.');
   };
   
+  // Switch account button
+  document.getElementById('switch-account-btn').onclick = () => {
+    switchSpotifyAccount();
+  };
+  
+  // Refresh playlists button
+  document.getElementById('refresh-playlists-btn').onclick = () => {
+    fetchUserPlaylists();
+  };
+  
   // Initialize histogram bars
   createGlossyEqBars();
   
@@ -1119,10 +1311,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.player-info').appendChild(logoutBtn);
     logoutBtn.onclick = () => {
       clearSpotifyToken();
+      clearSimilarSongsQueue();
       accessToken = null;
+      currentTrackId = null;
       updateStatus('Logged out. Please login to Spotify to search for songs and discover similar music');
       document.getElementById('login-btn').hidden = false;
+      document.getElementById('switch-account-btn').hidden = true;
       if (player && player.disconnect) player.disconnect();
+      player = null;
+      
+      // Reset UI
+      document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading your playlists...</div>';
+      showSearchResults(false);
+      animateGlossyEqBars(false);
     };
   }
 }); 
