@@ -5,11 +5,6 @@
   box-sizing: border-box;
 }
 
-body {
-  font-family: 'Arial', sans-serif;
-  overflow: hidden;
-}
-
 /* Background */
 body::before {
   content: '';
@@ -20,6 +15,16 @@ body::before {
   height: 100%;
   background: url('heaven.jpg') no-repeat center center/cover;
   z-index: -1;
+}
+
+body {
+  font-family: 'Arial', sans-serif;
+  min-height: 100vh;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: url('heaven.jpg') no-repeat center center/cover;
+  background-attachment: fixed;
 }
 
 /* Falling leaves */
@@ -107,6 +112,8 @@ header {
   padding: 20px;
   max-width: 1200px;
   margin: auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .app-button {
@@ -122,6 +129,7 @@ header {
   height: 150px;
   box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
+  flex-shrink: 0;
 }
 
 .app-button:hover {
@@ -152,49 +160,41 @@ footer {
 }
 
 /* Layout and Spotify Player Styles */
-html, body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  min-height: 100vh;
-  height: 100vh;
-  overflow: hidden;
-  font-family: 'Arial', sans-serif;
-  background: url('heaven.jpg') no-repeat center center/cover;
-}
-
 .main-layout {
   display: flex;
   flex-direction: row;
-  height: 100vh;
+  min-height: 100vh;
   width: 100vw;
+  position: relative;
 }
 
 .main-content {
   flex: 1;
   overflow-y: auto;
-  padding: 40px 0 0 0;
+  padding: 40px 0 60px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   background: transparent;
   min-width: 0;
+  height: auto;
+  min-height: 100vh;
 }
 
 .sidebar-player {
   width: 420px;
   min-width: 320px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   background: none;
   box-shadow: none;
   height: 100vh;
+  position: sticky;
+  top: 0;
   z-index: 2;
-  position: relative;
+  overflow-y: auto;
+  padding: 20px 0;
 }
 
 .spotify-player-custom {
@@ -469,6 +469,7 @@ body {
   backdrop-filter: blur(16px) saturate(1.5);
   -webkit-backdrop-filter: blur(16px) saturate(1.5);
   transition: background 0.3s, box-shadow 0.3s;
+  box-sizing: border-box;
 }
 
 .song-search-section h3 {
@@ -823,6 +824,7 @@ body {
   min-width: 0;
   backdrop-filter: blur(8px) saturate(1.2);
   -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  box-sizing: border-box;
 }
 
 /* Playlist Section */
@@ -840,6 +842,7 @@ body {
   backdrop-filter: blur(16px) saturate(1.5);
   -webkit-backdrop-filter: blur(16px) saturate(1.5);
   transition: background 0.3s, box-shadow 0.3s;
+  box-sizing: border-box;
 }
 
 .playlist-header {
@@ -884,6 +887,7 @@ body {
   box-shadow: 0 1px 8px 0 rgba(0,0,0,0.06);
   backdrop-filter: blur(8px) saturate(1.2);
   -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  box-sizing: border-box;
 }
 
 .playlists-container::-webkit-scrollbar {
@@ -990,4 +994,66 @@ body {
   font-style: italic;
   padding: 20px;
   font-size: 14px;
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 768px) {
+  .main-layout {
+    flex-direction: column;
+  }
+  
+  .sidebar-player {
+    width: 100%;
+    min-width: auto;
+    height: auto;
+    position: relative;
+    order: 2;
+  }
+  
+  .main-content {
+    order: 1;
+    padding: 20px 0 40px 0;
+  }
+  
+  .app-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    padding: 15px;
+  }
+  
+  .app-button {
+    width: 120px;
+    height: 120px;
+    padding: 15px;
+  }
+  
+  .app-button img {
+    width: 50px;
+  }
+  
+  .app-button span {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+  
+  .app-button {
+    width: 100px;
+    height: 100px;
+    padding: 10px;
+  }
+  
+  .app-button img {
+    width: 40px;
+  }
+  
+  .app-button span {
+    font-size: 11px;
+  }
 } 
