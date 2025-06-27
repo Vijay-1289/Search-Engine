@@ -1336,3 +1336,46 @@ function displayFeaturedPlaylists(playlists) {
 
   container.innerHTML = playlistsHTML;
 }
+
+function setupEventListeners() {
+  // Play button
+  const playBtn = document.getElementById('play-btn');
+  if (playBtn) playBtn.onclick = () => {
+    if (currentTrackId) playSong(currentTrackId);
+  };
+
+  // Next button
+  const nextBtn = document.getElementById('next-btn');
+  if (nextBtn) nextBtn.onclick = () => playNextSimilarSong();
+
+  // Previous button
+  const prevBtn = document.getElementById('prev-btn');
+  if (prevBtn) prevBtn.onclick = () => {/* Optionally implement previous track logic */};
+
+  // Seek bar
+  const seekBar = document.getElementById('seek-bar');
+  if (seekBar) seekBar.oninput = (e) => {
+    // Optionally implement seek logic for remote device
+  };
+
+  // Search button
+  const searchBtn = document.getElementById('song-search-btn');
+  if (searchBtn) searchBtn.onclick = () => {
+    const query = document.getElementById('song-search-input').value.trim();
+    if (query) searchSongs(query);
+  };
+
+  // Login button
+  const loginBtn = document.getElementById('login-btn');
+  if (loginBtn) loginBtn.onclick = loginWithSpotify;
+
+  // Refresh playlists
+  const refreshPlaylistsBtn = document.getElementById('refresh-playlists-btn');
+  if (refreshPlaylistsBtn) refreshPlaylistsBtn.onclick = loadFeaturedPlaylists;
+
+  // Refresh devices
+  const refreshDevicesBtn = document.getElementById('refresh-devices-btn');
+  if (refreshDevicesBtn) refreshDevicesBtn.onclick = updateDeviceList;
+
+  // Add more as needed...
+}
