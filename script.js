@@ -46,6 +46,9 @@ let player, deviceId, accessToken;
 let seekBarUpdateTimer = null; // Timer for updating seek bar
 let currentTrackDuration = 0; // Store current track duration
 let isConnecting = false; // Prevent multiple connection attempts
+let currentTrackId = null; // Track the current playing song ID
+let similarSongsQueue = []; // Queue of similar songs to play
+let isAutoPlayingSimilar = false; // Flag to prevent infinite loops
 
 // PKCE (Proof Key for Code Exchange) functions
 function generateCodeVerifier(length) {
@@ -303,6 +306,10 @@ function updatePlayerUI(state) {
   const track = state.track_window.current_track;
   const position = state.position;
   const duration = track.duration_ms;
+  
+  // Update current track ID
+  currentTrackId = track.id;
+  
   document.getElementById('player-title').textContent = track.name;
   const artwork = document.getElementById('player-artwork');
   if (track.album.images.length > 0) artwork.src = track.album.images[0].url;
@@ -473,10 +480,16 @@ function setupPlayer() {
     
     if (state) {
       updateStatus('Now playing');
+      currentTrackId = state.track_window.current_track.id;
     } else {
-      // No state means no track is playing
+      // No state means track ended - play next similar song
       stopSeekBarTimer();
-      updateStatus('No track playing');
+      updateStatus('Track ended, playing next similar song...');
+      
+      // Auto-play next similar song if available
+      setTimeout(() => {
+        playNextSimilarSong();
+      }, 1000);
     }
   });
   
@@ -653,10 +666,22 @@ async function playSong(trackUri) {
 
     updateStatus('Song started playing!');
     
+    // Extract track ID from URI and initialize similar songs queue
+    const trackId = trackUri.split(':').pop();
+    currentTrackId = trackId;
+    
+    // Get similar songs for the queue
+    setTimeout(async () => {
+      const similarSongs = await getSimilarSongsForQueue(trackId);
+      similarSongsQueue = similarSongs;
+      console.log(`Added ${similarSongs.length} similar songs to queue`);
+      updateStatus(`Added ${similarSongs.length} similar songs to auto-play queue!`);
+    }, 2000);
+    
     // Hide search results and return to player view
     setTimeout(() => {
       showSearchResults(false);
-      updateStatus('Now playing - enjoy your music!');
+      updateStatus('Now playing - similar songs will auto-play next!');
     }, 1000);
 
   } catch (error) {
@@ -788,6 +813,87 @@ function testSpotifyAuth() {
   
   // Open URL in new tab for testing
   window.open(url, '_blank');
+}
+
+// --- Auto-play similar songs logic ---
+async function getSimilarSongsForQueue(trackId) {
+  if (!trackId || !accessToken) return [];
+  
+  try {
+    // Get track audio features first
+    const featuresResponse = await makeSpotifyRequest(`https://api.spotify.com/v1/audio-features/${trackId}`);
+    if (!featuresResponse.ok) return [];
+    
+    const features = await featuresResponse.json();
+    
+    // Get recommendations based on the track
+    const recommendationsResponse = await makeSpotifyRequest(
+      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`
+    );
+    
+    if (!recommendationsResponse.ok) return [];
+    
+    const recommendations = await recommendationsResponse.json();
+    return recommendations.tracks;
+    
+  } catch (error) {
+    console.error('Error getting similar songs for queue:', error);
+    return [];
+  }
+}
+
+async function playNextSimilarSong() {
+  if (similarSongsQueue.length === 0 || isAutoPlayingSimilar) return;
+  
+  isAutoPlayingSimilar = true;
+  const nextSong = similarSongsQueue.shift(); // Get and remove the first song
+  
+  try {
+    updateStatus(`Playing next: ${nextSong.name} - ${nextSong.artists.map(a => a.name).join(', ')}`);
+    
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        uris: [nextSong.uri]
+      })
+    });
+    
+    if (response.ok) {
+      currentTrackId = nextSong.id;
+      updateStatus(`Now playing: ${nextSong.name} - ${nextSong.artists.map(a => a.name).join(', ')} (${similarSongsQueue.length} more in queue)`);
+      
+      // Get more similar songs for the queue when this song starts
+      setTimeout(async () => {
+        const moreSimilarSongs = await getSimilarSongsForQueue(nextSong.id);
+        similarSongsQueue.push(...moreSimilarSongs);
+        console.log(`Added ${moreSimilarSongs.length} more similar songs to queue. Total: ${similarSongsQueue.length}`);
+      }, 2000);
+    }
+    
+  } catch (error) {
+    console.error('Error playing next similar song:', error);
+    updateStatus('Failed to play next song', true);
+  } finally {
+    isAutoPlayingSimilar = false;
+  }
+}
+
+function clearSimilarSongsQueue() {
+  similarSongsQueue = [];
+  currentTrackId = null;
+  isAutoPlayingSimilar = false;
+  console.log('Similar songs queue cleared');
+}
+
+function getQueueStatus() {
+  return {
+    currentTrack: currentTrackId,
+    queueLength: similarSongsQueue.length,
+    isAutoPlaying: isAutoPlayingSimilar
+  };
 }
 
 // Initialize everything when DOM is loaded
