@@ -255,24 +255,54 @@ function extractSpotifyPlaylistId(url) {
 }
 
 function updatePlayerUI(state) {
-  if (!state) return;
-  
+  if (!state) {
+    document.getElementById('player-title').textContent = 'Spotify Music Player';
+    document.getElementById('current-time').textContent = '00:00';
+    document.getElementById('duration').textContent = '00:00';
+    document.getElementById('seek-bar').value = 0;
+    document.getElementById('seek-bar').max = 100;
+    updateHistogramAnimation(false); // Paused animation
+    updateSeekBarProgress(0, 100);
+    return;
+  }
+
   const track = state.track_window.current_track;
-  const artists = track.artists.map(a => a.name).join(', ');
+  const position = state.position;
+  const duration = track.duration_ms;
+
+  // Update track info
+  document.getElementById('player-title').textContent = track.name;
   
-  document.getElementById('player-title').textContent = `${track.name} - ${artists}`;
-  document.getElementById('player-artwork').src = track.album.images[0]?.url || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80';
-  document.getElementById('current-time').textContent = msToTime(state.position);
-  document.getElementById('duration').textContent = msToTime(state.duration);
-  document.getElementById('seek-bar').max = state.duration;
-  document.getElementById('seek-bar').value = state.position;
-  document.getElementById('play-btn').textContent = state.paused ? '▶️' : '⏸️';
+  // Update artwork
+  const artwork = document.getElementById('player-artwork');
+  if (track.album.images.length > 0) {
+    artwork.src = track.album.images[0].url;
+  }
   
-  // Store duration for timer updates
-  currentTrackDuration = state.duration;
+  // Update histogram for the current track
+  updateHistogramForTrack(track.id);
+
+  // Update times
+  document.getElementById('current-time').textContent = msToTime(position);
+  document.getElementById('duration').textContent = msToTime(duration);
+
+  // Update seek bar
+  const seekBar = document.getElementById('seek-bar');
+  seekBar.max = duration;
+  seekBar.value = position;
   
-  // Start or stop the seek bar update timer
-  if (!state.paused && state.position > 0) {
+  // Update histogram animation based on playback state
+  updateHistogramAnimation(!state.paused);
+  
+  // Update seek bar progress
+  updateSeekBarProgress(position, duration);
+
+  // Update play button
+  const playBtn = document.getElementById('play-btn');
+  playBtn.textContent = state.paused ? '▶️' : '⏸️';
+
+  // Start/stop seek bar timer
+  if (!state.paused) {
     startSeekBarTimer();
   } else {
     stopSeekBarTimer();
@@ -280,27 +310,30 @@ function updatePlayerUI(state) {
 }
 
 function startSeekBarTimer() {
-  // Clear existing timer
-  stopSeekBarTimer();
+  if (seekBarUpdateTimer) {
+    clearInterval(seekBarUpdateTimer);
+  }
   
-  // Start new timer to update seek bar every 100ms
   seekBarUpdateTimer = setInterval(() => {
-    if (player && currentTrackDuration > 0) {
-      // Get current position from player
+    if (player) {
       player.getCurrentState().then(state => {
         if (state && !state.paused) {
-          const seekBar = document.getElementById('seek-bar');
-          const currentTime = document.getElementById('current-time');
+          const position = state.position;
+          const duration = state.track_window.current_track.duration_ms;
           
-          // Update seek bar position
-          seekBar.value = state.position;
-          currentTime.textContent = msToTime(state.position);
+          // Update seek bar
+          document.getElementById('seek-bar').value = position;
+          document.getElementById('current-time').textContent = msToTime(position);
+          
+          // Update histogram animation
+          updateHistogramAnimation(true);
+          
+          // Update seek bar progress
+          updateSeekBarProgress(position, duration);
         }
-      }).catch(error => {
-        console.error('Error getting current state:', error);
       });
     }
-  }, 100); // Update every 100ms for smooth movement
+  }, 1000);
 }
 
 function stopSeekBarTimer() {
@@ -308,6 +341,9 @@ function stopSeekBarTimer() {
     clearInterval(seekBarUpdateTimer);
     seekBarUpdateTimer = null;
   }
+  
+  // Update histogram to paused state
+  updateHistogramAnimation(false);
 }
 
 function updateStatus(message, isError = false) {
@@ -514,7 +550,7 @@ async function searchSongs(query) {
     document.getElementById('search-results').innerHTML = '';
     document.getElementById('similar-songs').innerHTML = '';
 
-    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`);
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=15`);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -522,6 +558,7 @@ async function searchSongs(query) {
 
     const data = await response.json();
     displaySearchResults(data.tracks.items);
+    showSearchResults(true); // Show search results with similar songs
     updateStatus(`Found ${data.tracks.items.length} songs`);
 
   } catch (error) {
@@ -565,6 +602,7 @@ async function getSimilarSongs(trackId) {
 
     const recommendations = await recommendationsResponse.json();
     displaySimilarSongs(recommendations.tracks);
+    showSearchResults(true); // Show search results with similar songs
     updateStatus(`Found ${recommendations.tracks.length} similar songs`);
 
   } catch (error) {
@@ -601,6 +639,12 @@ async function playSong(trackUri) {
     }
 
     updateStatus('Song started playing!');
+    
+    // Hide search results and return to player view
+    setTimeout(() => {
+      showSearchResults(false);
+      updateStatus('Now playing - enjoy your music!');
+    }, 1000);
 
   } catch (error) {
     console.error('Error playing song:', error);
@@ -617,6 +661,7 @@ function displaySearchResults(tracks) {
   
   if (!tracks || tracks.length === 0) {
     resultsContainer.innerHTML = '<div class="no-results">No songs found. Try a different search term.</div>';
+    resultsContainer.style.display = 'block';
     return;
   }
 
@@ -633,6 +678,10 @@ function displaySearchResults(tracks) {
   `).join('');
 
   resultsContainer.innerHTML = resultsHTML;
+  resultsContainer.style.display = 'block';
+  resultsContainer.style.overflowY = 'auto';
+  
+  console.log(`Displayed ${tracks.length} search results`);
 }
 
 function displaySimilarSongs(tracks) {
@@ -640,6 +689,7 @@ function displaySimilarSongs(tracks) {
   
   if (!tracks || tracks.length === 0) {
     similarContainer.innerHTML = '<div class="no-results">No similar songs found.</div>';
+    similarContainer.style.display = 'block';
     return;
   }
 
@@ -658,6 +708,10 @@ function displaySimilarSongs(tracks) {
   `;
 
   similarContainer.innerHTML = similarHTML;
+  similarContainer.style.display = 'block';
+  similarContainer.style.overflowY = 'auto';
+  
+  console.log(`Displayed ${tracks.length} similar songs`);
 }
 
 function showSearchLoading(show) {
@@ -672,6 +726,70 @@ function showSearchLoading(show) {
     button.disabled = false;
     button.textContent = 'Search';
     indicator.style.display = 'none';
+  }
+}
+
+function showSearchResults(show) {
+  const searchResults = document.getElementById('search-results');
+  const similarSongs = document.getElementById('similar-songs');
+  const returnBtn = document.getElementById('return-to-player-btn');
+  
+  if (show) {
+    searchResults.style.display = 'block';
+    similarSongs.style.display = 'block';
+    returnBtn.style.display = 'block';
+    
+    // Ensure containers are scrollable
+    searchResults.style.overflowY = 'auto';
+    similarSongs.style.overflowY = 'auto';
+  } else {
+    searchResults.style.display = 'none';
+    similarSongs.style.display = 'none';
+    returnBtn.style.display = 'none';
+    // Clear the results
+    searchResults.innerHTML = '';
+    similarSongs.innerHTML = '';
+  }
+}
+
+function createHistogramBars() {
+  const histogramContainer = document.getElementById('histogram-bars');
+  const barCount = 50; // Number of bars in the histogram
+  
+  histogramContainer.innerHTML = '';
+  
+  for (let i = 0; i < barCount; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'histogram-bar';
+    // Create a more realistic waveform pattern
+    const height = Math.sin(i * 0.3) * 30 + Math.random() * 40 + 20;
+    bar.style.height = Math.max(10, Math.min(100, height)) + '%';
+    histogramContainer.appendChild(bar);
+  }
+}
+
+function updateHistogramAnimation(isPlaying) {
+  const bars = document.querySelectorAll('.histogram-bar');
+  
+  bars.forEach((bar, index) => {
+    if (isPlaying) {
+      // Create a more dynamic animation when playing
+      const delay = (index * 0.1) % 2;
+      bar.style.animation = `histogramPulse 1.5s ease-in-out infinite ${delay}s`;
+      bar.style.opacity = '0.8';
+    } else {
+      // Slower, more subtle animation when paused
+      bar.style.animation = `histogramPulse 3s ease-in-out infinite ${index * 0.2}s`;
+      bar.style.opacity = '0.4';
+    }
+  });
+}
+
+function updateSeekBarProgress(currentTime, duration) {
+  const progressBar = document.getElementById('seek-bar-progress');
+  if (duration > 0) {
+    const progress = (currentTime / duration) * 100;
+    progressBar.style.width = `${progress}%`;
   }
 }
 
@@ -690,6 +808,41 @@ function testSpotifyAuth() {
   
   // Open URL in new tab for testing
   window.open(url, '_blank');
+}
+
+function updateHistogramForTrack(trackId) {
+  if (!trackId || !accessToken) return;
+  
+  // Get audio features for the track to create more realistic histogram
+  makeSpotifyRequest(`https://api.spotify.com/v1/audio-features/${trackId}`)
+    .then(response => response.json())
+    .then(features => {
+      const bars = document.querySelectorAll('.histogram-bar');
+      const barCount = bars.length;
+      
+      bars.forEach((bar, index) => {
+        // Use audio features to influence the animation
+        const energy = features.energy || 0.5;
+        const danceability = features.danceability || 0.5;
+        const valence = features.valence || 0.5;
+        
+        // Create a pattern based on audio features
+        const baseHeight = (energy * 60) + (danceability * 20) + (valence * 20);
+        const variation = Math.sin(index * 0.2) * 20 + Math.random() * 30;
+        const height = Math.max(10, Math.min(100, baseHeight + variation));
+        
+        bar.style.height = height + '%';
+        
+        // Adjust animation speed based on tempo
+        const tempo = features.tempo || 120;
+        const animationDuration = Math.max(1, Math.min(3, 2 - (tempo - 120) / 60));
+        bar.style.animationDuration = `${animationDuration}s`;
+      });
+    })
+    .catch(error => {
+      console.error('Error getting audio features for histogram:', error);
+      // Fallback to default animation
+    });
 }
 
 // Initialize everything when DOM is loaded
@@ -905,6 +1058,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('song-search-btn').click();
     }
   });
+  
+  // Return to player button
+  document.getElementById('return-to-player-btn').onclick = () => {
+    showSearchResults(false);
+    updateStatus('Welcome back! You can now search for songs and discover similar music.');
+  };
+  
+  // Initialize histogram bars
+  createHistogramBars();
   
   // Test auth button
   document.getElementById('test-auth-btn').onclick = async () => {

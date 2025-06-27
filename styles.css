@@ -245,13 +245,126 @@ body {
 .player-times {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 10px;
+  font-size: 12px;
+  color: #fff;
 }
 
 #seek-bar {
   flex: 1;
-  margin: 0 10px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+#seek-bar::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #1DB954;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  position: relative;
+}
+
+#seek-bar::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #1DB954;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Histogram Animation */
+.seek-bar-container {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.histogram-bars {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+}
+
+.histogram-bar {
+  flex: 1;
+  background: linear-gradient(to top, #1DB954, #1ed760);
+  border-radius: 1px;
+  animation: histogramPulse 2s ease-in-out infinite;
+  opacity: 0.6;
+}
+
+.histogram-bar:nth-child(odd) {
+  animation-delay: 0.1s;
+}
+
+.histogram-bar:nth-child(even) {
+  animation-delay: 0.3s;
+}
+
+.histogram-bar:nth-child(3n) {
+  animation-delay: 0.5s;
+}
+
+.histogram-bar:nth-child(4n) {
+  animation-delay: 0.7s;
+}
+
+.histogram-bar:nth-child(5n) {
+  animation-delay: 0.9s;
+}
+
+@keyframes histogramPulse {
+  0%, 100% {
+    transform: scaleY(0.3);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 0.8;
+  }
+}
+
+/* Enhanced seek bar with histogram overlay */
+#seek-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  z-index: 5;
+}
+
+.seek-bar-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #1DB954, #1ed760);
+  border-radius: 3px;
+  transition: width 0.1s ease;
+  z-index: 1;
 }
 
 .player-title {
@@ -378,6 +491,35 @@ body {
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+.search-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.search-header h3 {
+  margin: 0;
+  flex: 1;
+}
+
+.return-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 15px;
+  padding: 8px 15px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.return-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+}
+
 .song-search-input {
   display: flex;
   gap: 10px;
@@ -428,18 +570,45 @@ body {
 /* Search Results */
 .search-results {
   margin-bottom: 15px;
+  max-height: 300px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  display: none; /* Initially hidden */
+}
+
+.search-results:not(:empty) {
+  display: block; /* Show when there's content */
+}
+
+.search-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.search-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.search-results::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.search-results::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .search-result-item {
   display: flex;
   align-items: center;
-  padding: 10px;
-  margin-bottom: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.3s ease;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  min-height: 70px;
 }
 
 .search-result-item:hover {
@@ -453,24 +622,32 @@ body {
   border-radius: 5px;
   margin-right: 12px;
   object-fit: cover;
+  flex-shrink: 0;
 }
 
 .search-result-info {
   flex: 1;
+  min-width: 0;
 }
 
 .search-result-title {
   color: #fff;
   font-weight: bold;
   font-size: 14px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .search-result-artist {
   color: rgba(255, 255, 255, 0.8);
   font-size: 12px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .search-result-play {
@@ -513,6 +690,32 @@ body {
 /* Similar Songs */
 .similar-songs {
   margin-top: 15px;
+  max-height: 250px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  display: none; /* Initially hidden */
+}
+
+.similar-songs:not(:empty) {
+  display: block; /* Show when there's content */
+}
+
+.similar-songs::-webkit-scrollbar {
+  width: 6px;
+}
+
+.similar-songs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.similar-songs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.similar-songs::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .similar-songs h4 {
@@ -526,13 +729,14 @@ body {
 .similar-song-item {
   display: flex;
   align-items: center;
-  padding: 8px;
-  margin-bottom: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s ease;
   border: 1px solid rgba(255, 255, 255, 0.05);
+  min-height: 60px;
 }
 
 .similar-song-item:hover {
@@ -546,24 +750,32 @@ body {
   border-radius: 4px;
   margin-right: 10px;
   object-fit: cover;
+  flex-shrink: 0;
 }
 
 .similar-song-info {
   flex: 1;
+  min-width: 0;
 }
 
 .similar-song-title {
   color: #fff;
   font-weight: bold;
   font-size: 12px;
-  margin-bottom: 1px;
+  margin-bottom: 2px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .similar-song-artist {
   color: rgba(255, 255, 255, 0.7);
   font-size: 10px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .similar-song-play {
