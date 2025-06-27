@@ -223,8 +223,18 @@ async function loginWithSpotify() {
     updateStatus('Setting up Spotify access...');
     await getClientCredentialsToken();
     
-    document.getElementById('login-btn').hidden = true;
-    document.getElementById('switch-account-btn').hidden = true; // No need for account switching
+    // Check if elements exist before trying to modify them
+    const loginBtn = document.getElementById('login-btn');
+    const switchAccountBtn = document.getElementById('switch-account-btn');
+    
+    if (loginBtn) {
+      loginBtn.hidden = true;
+    }
+    
+    if (switchAccountBtn) {
+      switchAccountBtn.hidden = true; // No need for account switching
+    }
+    
     updateStatus('Ready! You can now search for songs and discover music.');
     
     // Load featured playlists instead of user playlists
@@ -233,6 +243,12 @@ async function loginWithSpotify() {
   } catch (error) {
     console.error('Login failed:', error);
     updateStatus('Failed to authenticate. Please try again.', true);
+    
+    // Make sure login button is visible if login fails
+    const loginBtn = document.getElementById('login-btn');
+    if (loginBtn) {
+      loginBtn.hidden = false;
+    }
   }
 }
 
@@ -1090,10 +1106,23 @@ function clearAllAuthData() {
   // Clear similar songs queue
   clearSimilarSongsQueue();
   
-  // Reset UI
-  document.getElementById('login-btn').hidden = false;
-  document.getElementById('switch-account-btn').hidden = true;
-  document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
+  // Reset UI - check if elements exist first
+  const loginBtn = document.getElementById('login-btn');
+  const switchAccountBtn = document.getElementById('switch-account-btn');
+  const playlistsContainer = document.getElementById('playlists-container');
+  
+  if (loginBtn) {
+    loginBtn.hidden = false;
+  }
+  
+  if (switchAccountBtn) {
+    switchAccountBtn.hidden = true;
+  }
+  
+  if (playlistsContainer) {
+    playlistsContainer.innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
+  }
+  
   showSearchResults(false);
   animateGlossyEqBars(false);
   
@@ -1112,30 +1141,52 @@ window.clearAllAuthData = clearAllAuthData;
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('Initializing Spotify app with client credentials...');
   
-  // Check for saved token first
-  const savedToken = getSavedSpotifyToken();
-  if (savedToken) {
-    // Check if the saved token is still valid
-    const isValid = await checkTokenValidity(savedToken);
-    if (isValid) {
-      accessToken = savedToken;
-      document.getElementById('login-btn').hidden = true;
-      document.getElementById('switch-account-btn').hidden = true; // No account switching needed
-      updateStatus('Welcome back! You can search for songs and discover music.');
-      // Load featured playlists
-      setTimeout(() => loadFeaturedPlaylists(), 1000);
+  // Small delay to ensure all DOM elements are fully loaded
+  setTimeout(async () => {
+    // Check for saved token first
+    const savedToken = getSavedSpotifyToken();
+    if (savedToken) {
+      // Check if the saved token is still valid
+      const isValid = await checkTokenValidity(savedToken);
+      if (isValid) {
+        accessToken = savedToken;
+        
+        // Check if elements exist before modifying them
+        const loginBtn = document.getElementById('login-btn');
+        const switchAccountBtn = document.getElementById('switch-account-btn');
+        
+        if (loginBtn) {
+          loginBtn.hidden = true;
+        }
+        
+        if (switchAccountBtn) {
+          switchAccountBtn.hidden = true; // No account switching needed
+        }
+        
+        updateStatus('Welcome back! You can search for songs and discover music.');
+        // Load featured playlists
+        setTimeout(() => loadFeaturedPlaylists(), 1000);
+      } else {
+        // Token is expired, clear it and show login button
+        clearSpotifyToken();
+        updateStatus('Session expired. Please login again.');
+        
+        const loginBtn = document.getElementById('login-btn');
+        if (loginBtn) {
+          loginBtn.hidden = false;
+          loginBtn.onclick = loginWithSpotify;
+        }
+      }
     } else {
-      // Token is expired, clear it and show login button
-      clearSpotifyToken();
-      updateStatus('Session expired. Please login again.');
-      document.getElementById('login-btn').hidden = false;
-      document.getElementById('login-btn').onclick = loginWithSpotify;
+      // No token, show login button
+      updateStatus('Click "Login with Spotify" to start discovering music!');
+      
+      const loginBtn = document.getElementById('login-btn');
+      if (loginBtn) {
+        loginBtn.onclick = loginWithSpotify;
+      }
     }
-  } else {
-    // No token, show login button
-    updateStatus('Click "Login with Spotify" to start discovering music!');
-    document.getElementById('login-btn').onclick = loginWithSpotify;
-  }
+  }, 100); // Small delay to ensure DOM is ready
   
   // Player control event listeners
   document.getElementById('play-btn').onclick = () => {
@@ -1278,20 +1329,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     logoutBtn.style.padding = '10px 20px';
     logoutBtn.style.cursor = 'pointer';
     logoutBtn.style.fontSize = '14px';
-    document.querySelector('.player-info').appendChild(logoutBtn);
+    
+    const playerInfo = document.querySelector('.player-info');
+    if (playerInfo) {
+      playerInfo.appendChild(logoutBtn);
+    }
+    
     logoutBtn.onclick = () => {
       clearSpotifyToken();
       clearSimilarSongsQueue();
       accessToken = null;
       currentTrackId = null;
       updateStatus('Logged out. Please login to Spotify to search for songs and discover music');
-      document.getElementById('login-btn').hidden = false;
-      document.getElementById('switch-account-btn').hidden = true;
+      
+      const loginBtn = document.getElementById('login-btn');
+      const switchAccountBtn = document.getElementById('switch-account-btn');
+      const playlistsContainer = document.getElementById('playlists-container');
+      
+      if (loginBtn) {
+        loginBtn.hidden = false;
+      }
+      
+      if (switchAccountBtn) {
+        switchAccountBtn.hidden = true;
+      }
+      
       if (player && player.disconnect) player.disconnect();
       player = null;
       
       // Reset UI
-      document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
+      if (playlistsContainer) {
+        playlistsContainer.innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
+      }
       showSearchResults(false);
       animateGlossyEqBars(false);
     };
