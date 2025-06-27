@@ -254,6 +254,41 @@ function extractSpotifyPlaylistId(url) {
   return '';
 }
 
+// --- Glossy Equalizer Bar Logic ---
+function createGlossyEqBars() {
+  const eqContainer = document.getElementById('glossy-eq-bars');
+  const colors = ['red','orange','yellow','green','cyan','blue','purple'];
+  const barCount = 32;
+  eqContainer.innerHTML = '';
+  for (let i = 0; i < barCount; i++) {
+    const bar = document.createElement('div');
+    // Assign a color class in a rainbow pattern
+    bar.className = 'glossy-eq-bar ' + colors[Math.floor(i/(barCount/colors.length))];
+    bar.style.height = '30%';
+    eqContainer.appendChild(bar);
+  }
+}
+
+let glossyEqAnimTimer = null;
+function animateGlossyEqBars(isPlaying) {
+  const bars = document.querySelectorAll('.glossy-eq-bar');
+  if (glossyEqAnimTimer) clearInterval(glossyEqAnimTimer);
+  if (!isPlaying) {
+    // Set all bars to a low, idle state
+    bars.forEach(bar => bar.style.height = (20 + Math.random()*10) + '%');
+    return;
+  }
+  glossyEqAnimTimer = setInterval(() => {
+    bars.forEach((bar, i) => {
+      // Rainbow wave pattern, glossy look
+      const base = 40 + 30*Math.abs(Math.sin(Date.now()/400 + i/2));
+      const gloss = 10 + 10*Math.abs(Math.cos(Date.now()/200 + i));
+      bar.style.height = (base + gloss + Math.random()*10) + '%';
+    });
+  }, 120);
+}
+
+// --- Update player UI to use glossy eq bars ---
 function updatePlayerUI(state) {
   if (!state) {
     document.getElementById('player-title').textContent = 'Spotify Music Player';
@@ -261,47 +296,25 @@ function updatePlayerUI(state) {
     document.getElementById('duration').textContent = '00:00';
     document.getElementById('seek-bar').value = 0;
     document.getElementById('seek-bar').max = 100;
-    updateHistogramAnimation(false); // Paused animation
+    animateGlossyEqBars(false);
     updateSeekBarProgress(0, 100);
     return;
   }
-
   const track = state.track_window.current_track;
   const position = state.position;
   const duration = track.duration_ms;
-
-  // Update track info
   document.getElementById('player-title').textContent = track.name;
-  
-  // Update artwork
   const artwork = document.getElementById('player-artwork');
-  if (track.album.images.length > 0) {
-    artwork.src = track.album.images[0].url;
-  }
-  
-  // Update histogram for the current track
-  updateHistogramForTrack(track.id);
-
-  // Update times
+  if (track.album.images.length > 0) artwork.src = track.album.images[0].url;
   document.getElementById('current-time').textContent = msToTime(position);
   document.getElementById('duration').textContent = msToTime(duration);
-
-  // Update seek bar
   const seekBar = document.getElementById('seek-bar');
   seekBar.max = duration;
   seekBar.value = position;
-  
-  // Update histogram animation based on playback state
-  updateHistogramAnimation(!state.paused);
-  
-  // Update seek bar progress
+  animateGlossyEqBars(!state.paused);
   updateSeekBarProgress(position, duration);
-
-  // Update play button
   const playBtn = document.getElementById('play-btn');
   playBtn.textContent = state.paused ? '▶️' : '⏸️';
-
-  // Start/stop seek bar timer
   if (!state.paused) {
     startSeekBarTimer();
   } else {
@@ -326,7 +339,7 @@ function startSeekBarTimer() {
           document.getElementById('current-time').textContent = msToTime(position);
           
           // Update histogram animation
-          updateHistogramAnimation(true);
+          animateGlossyEqBars(true);
           
           // Update seek bar progress
           updateSeekBarProgress(position, duration);
@@ -343,7 +356,7 @@ function stopSeekBarTimer() {
   }
   
   // Update histogram to paused state
-  updateHistogramAnimation(false);
+  animateGlossyEqBars(false);
 }
 
 function updateStatus(message, isError = false) {
@@ -752,39 +765,6 @@ function showSearchResults(show) {
   }
 }
 
-function createHistogramBars() {
-  const histogramContainer = document.getElementById('histogram-bars');
-  const barCount = 50; // Number of bars in the histogram
-  
-  histogramContainer.innerHTML = '';
-  
-  for (let i = 0; i < barCount; i++) {
-    const bar = document.createElement('div');
-    bar.className = 'histogram-bar';
-    // Create a more realistic waveform pattern
-    const height = Math.sin(i * 0.3) * 30 + Math.random() * 40 + 20;
-    bar.style.height = Math.max(10, Math.min(100, height)) + '%';
-    histogramContainer.appendChild(bar);
-  }
-}
-
-function updateHistogramAnimation(isPlaying) {
-  const bars = document.querySelectorAll('.histogram-bar');
-  
-  bars.forEach((bar, index) => {
-    if (isPlaying) {
-      // Create a more dynamic animation when playing
-      const delay = (index * 0.1) % 2;
-      bar.style.animation = `histogramPulse 1.5s ease-in-out infinite ${delay}s`;
-      bar.style.opacity = '0.8';
-    } else {
-      // Slower, more subtle animation when paused
-      bar.style.animation = `histogramPulse 3s ease-in-out infinite ${index * 0.2}s`;
-      bar.style.opacity = '0.4';
-    }
-  });
-}
-
 function updateSeekBarProgress(currentTime, duration) {
   const progressBar = document.getElementById('seek-bar-progress');
   if (duration > 0) {
@@ -808,41 +788,6 @@ function testSpotifyAuth() {
   
   // Open URL in new tab for testing
   window.open(url, '_blank');
-}
-
-function updateHistogramForTrack(trackId) {
-  if (!trackId || !accessToken) return;
-  
-  // Get audio features for the track to create more realistic histogram
-  makeSpotifyRequest(`https://api.spotify.com/v1/audio-features/${trackId}`)
-    .then(response => response.json())
-    .then(features => {
-      const bars = document.querySelectorAll('.histogram-bar');
-      const barCount = bars.length;
-      
-      bars.forEach((bar, index) => {
-        // Use audio features to influence the animation
-        const energy = features.energy || 0.5;
-        const danceability = features.danceability || 0.5;
-        const valence = features.valence || 0.5;
-        
-        // Create a pattern based on audio features
-        const baseHeight = (energy * 60) + (danceability * 20) + (valence * 20);
-        const variation = Math.sin(index * 0.2) * 20 + Math.random() * 30;
-        const height = Math.max(10, Math.min(100, baseHeight + variation));
-        
-        bar.style.height = height + '%';
-        
-        // Adjust animation speed based on tempo
-        const tempo = features.tempo || 120;
-        const animationDuration = Math.max(1, Math.min(3, 2 - (tempo - 120) / 60));
-        bar.style.animationDuration = `${animationDuration}s`;
-      });
-    })
-    .catch(error => {
-      console.error('Error getting audio features for histogram:', error);
-      // Fallback to default animation
-    });
 }
 
 // Initialize everything when DOM is loaded
@@ -1066,7 +1011,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   
   // Initialize histogram bars
-  createHistogramBars();
+  createGlossyEqBars();
   
   // Test auth button
   document.getElementById('test-auth-btn').onclick = async () => {

@@ -288,83 +288,61 @@ body {
 .seek-bar-container {
   position: relative;
   flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  height: 32px;
+  background: rgba(0,0,0,0.7);
+  border-radius: 8px;
   overflow: hidden;
-}
-
-.histogram-bars {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.4);
+  margin: 0 10px;
   display: flex;
   align-items: flex-end;
-  gap: 1px;
+}
+
+.glossy-eq-bars {
+  position: absolute;
+  left: 0; top: 0; width: 100%; height: 100%;
+  display: flex;
+  align-items: flex-end;
+  z-index: 2;
   pointer-events: none;
 }
 
-.histogram-bar {
+.glossy-eq-bar {
   flex: 1;
-  background: linear-gradient(to top, #1DB954, #1ed760);
-  border-radius: 1px;
-  animation: histogramPulse 2s ease-in-out infinite;
-  opacity: 0.6;
+  margin: 0 1px;
+  border-radius: 4px 4px 8px 8px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.2) 20%, var(--eq-color, #fff) 60%, rgba(0,0,0,0.7) 100%);
+  box-shadow: 0 2px 8px 0 rgba(0,0,0,0.3);
+  transition: height 0.2s cubic-bezier(.4,2,.6,1), background 0.3s;
+  opacity: 0.95;
 }
 
-.histogram-bar:nth-child(odd) {
-  animation-delay: 0.1s;
-}
+.glossy-eq-bar.red { --eq-color: #ff3c3c; }
+.glossy-eq-bar.orange { --eq-color: #ffb13c; }
+.glossy-eq-bar.yellow { --eq-color: #ffe93c; }
+.glossy-eq-bar.green { --eq-color: #3cff5e; }
+.glossy-eq-bar.cyan { --eq-color: #3cfff7; }
+.glossy-eq-bar.blue { --eq-color: #3c7cff; }
+.glossy-eq-bar.purple { --eq-color: #a13cff; }
 
-.histogram-bar:nth-child(even) {
-  animation-delay: 0.3s;
-}
+/* Hide the old histogram bars */
+.histogram-bars { display: none !important; }
 
-.histogram-bar:nth-child(3n) {
-  animation-delay: 0.5s;
-}
-
-.histogram-bar:nth-child(4n) {
-  animation-delay: 0.7s;
-}
-
-.histogram-bar:nth-child(5n) {
-  animation-delay: 0.9s;
-}
-
-@keyframes histogramPulse {
-  0%, 100% {
-    transform: scaleY(0.3);
-    opacity: 0.3;
-  }
-  50% {
-    transform: scaleY(1);
-    opacity: 0.8;
-  }
-}
-
-/* Enhanced seek bar with histogram overlay */
+/* Seek bar and progress overlay above equalizer */
 #seek-bar {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0; width: 100%; height: 100%;
   background: transparent;
-  z-index: 5;
+  z-index: 3;
 }
-
 .seek-bar-progress {
   position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
+  top: 0; left: 0; height: 100%;
   background: linear-gradient(90deg, #1DB954, #1ed760);
-  border-radius: 3px;
+  border-radius: 8px;
   transition: width 0.1s ease;
-  z-index: 1;
+  z-index: 2;
+  opacity: 0.5;
 }
 
 .player-title {
@@ -476,11 +454,15 @@ body {
 /* Song Search Section */
 .song-search-section {
   margin: 20px 0;
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 15px;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 15px 10px 15px 10px;
+  background: rgba(30, 30, 30, 0.95);
+  border-radius: 18px;
+  box-shadow: 0 2px 16px 0 rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+  max-width: 380px;
+  width: 100%;
+  min-width: 0;
+  align-self: center;
 }
 
 .song-search-section h3 {
@@ -820,4 +802,14 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   display: none;
+}
+
+/* Search Results Container Fit */
+.search-results, .similar-songs {
+  background: rgba(0,0,0,0.15);
+  border-radius: 12px;
+  padding: 4px 0;
+  box-shadow: 0 1px 8px 0 rgba(0,0,0,0.10);
+  max-width: 100%;
+  min-width: 0;
 } 
