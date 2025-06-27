@@ -39,6 +39,8 @@ const scopes = [
   'user-read-playback-state',
   'playlist-read-private',
   'playlist-read-collaborative',
+  'user-read-recently-played',
+  'user-top-read',
 ];
 let player, deviceId, accessToken;
 let seekBarUpdateTimer = null; // Timer for updating seek bar
@@ -379,6 +381,8 @@ function setupPlayer() {
   player.connect().then(success => {
     if (success) {
       console.log('Successfully connected to Spotify!');
+      updateStatus('Welcome back! You can now search for songs and discover similar music.');
+      setupPlayer();
     } else {
       updateStatus('Failed to connect to Spotify', true);
     }
@@ -434,6 +438,184 @@ function loadPlaylist(playlistId) {
   });
 }
 
+// Song Search Functions
+async function searchSongs(query) {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    showSearchLoading(true);
+    updateStatus('Searching for songs...');
+    
+    // Clear previous results
+    document.getElementById('search-results').innerHTML = '';
+    document.getElementById('similar-songs').innerHTML = '';
+
+    const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    displaySearchResults(data.tracks.items);
+    updateStatus(`Found ${data.tracks.items.length} songs`);
+
+  } catch (error) {
+    console.error('Error searching songs:', error);
+    updateStatus('Failed to search songs. Please try again.', true);
+  } finally {
+    showSearchLoading(false);
+  }
+}
+
+async function getSimilarSongs(trackId) {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    updateStatus('Finding similar songs...');
+
+    // Get track audio features first
+    const featuresResponse = await fetch(`https://api.spotify.com/v1/audio-features/${trackId}`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+
+    if (!featuresResponse.ok) {
+      throw new Error(`HTTP ${featuresResponse.status}: ${featuresResponse.statusText}`);
+    }
+
+    const features = await featuresResponse.json();
+
+    // Get recommendations based on the track
+    const recommendationsResponse = await fetch(
+      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    if (!recommendationsResponse.ok) {
+      throw new Error(`HTTP ${recommendationsResponse.status}: ${recommendationsResponse.statusText}`);
+    }
+
+    const recommendations = await recommendationsResponse.json();
+    displaySimilarSongs(recommendations.tracks);
+    updateStatus(`Found ${recommendations.tracks.length} similar songs`);
+
+  } catch (error) {
+    console.error('Error getting similar songs:', error);
+    updateStatus('Failed to get similar songs. Please try again.', true);
+  }
+}
+
+async function playSong(trackUri) {
+  if (!deviceId) {
+    updateStatus('Please wait for the player to be ready, then try again.', true);
+    return;
+  }
+
+  try {
+    updateStatus('Playing song...');
+
+    const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        uris: [trackUri]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    updateStatus('Song started playing!');
+
+  } catch (error) {
+    console.error('Error playing song:', error);
+    updateStatus('Failed to play song. Please try again.', true);
+  }
+}
+
+function displaySearchResults(tracks) {
+  const resultsContainer = document.getElementById('search-results');
+  
+  if (!tracks || tracks.length === 0) {
+    resultsContainer.innerHTML = '<div class="no-results">No songs found. Try a different search term.</div>';
+    return;
+  }
+
+  const resultsHTML = tracks.map(track => `
+    <div class="search-result-item">
+      <img src="${track.album.images[0]?.url || 'https://via.placeholder.com/50x50?text=No+Image'}" alt="${track.name}">
+      <div class="search-result-info">
+        <div class="search-result-title">${track.name}</div>
+        <div class="search-result-artist">${track.artists.map(artist => artist.name).join(', ')}</div>
+      </div>
+      <button class="search-result-play" onclick="playSong('${track.uri}')" title="Play">▶️</button>
+      <button class="search-result-similar" onclick="getSimilarSongs('${track.id}')" title="Find Similar">🎵</button>
+    </div>
+  `).join('');
+
+  resultsContainer.innerHTML = resultsHTML;
+}
+
+function displaySimilarSongs(tracks) {
+  const similarContainer = document.getElementById('similar-songs');
+  
+  if (!tracks || tracks.length === 0) {
+    similarContainer.innerHTML = '<div class="no-results">No similar songs found.</div>';
+    return;
+  }
+
+  const similarHTML = `
+    <h4>🎵 Similar Songs You Might Like</h4>
+    ${tracks.map(track => `
+      <div class="similar-song-item">
+        <img src="${track.album.images[0]?.url || 'https://via.placeholder.com/40x40?text=No+Image'}" alt="${track.name}">
+        <div class="similar-song-info">
+          <div class="similar-song-title">${track.name}</div>
+          <div class="similar-song-artist">${track.artists.map(artist => artist.name).join(', ')}</div>
+        </div>
+        <button class="similar-song-play" onclick="playSong('${track.uri}')" title="Play">▶️</button>
+      </div>
+    `).join('')}
+  `;
+
+  similarContainer.innerHTML = similarHTML;
+}
+
+function showSearchLoading(show) {
+  const button = document.getElementById('song-search-btn');
+  const indicator = document.getElementById('search-loading-indicator');
+  
+  if (show) {
+    button.disabled = true;
+    button.textContent = '';
+    indicator.style.display = 'block';
+  } else {
+    button.disabled = false;
+    button.textContent = 'Search';
+    indicator.style.display = 'none';
+  }
+}
+
 function testSpotifyAuth() {
   // Test function to check if the auth URL is valid
   const responseType = 'code';
@@ -473,7 +655,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     accessToken = params.access_token;
     console.log('Access token received (implicit flow), length:', accessToken.length);
     document.getElementById('login-btn').hidden = true;
-    updateStatus('Authentication successful! Setting up player...');
+    updateStatus('Authentication successful! You can now search for songs and discover similar music.');
     setupPlayer();
     saveSpotifyToken(accessToken);
   } else if (queryParams.code) {
@@ -486,7 +668,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.log('Token exchange successful, length:', token.length);
       
       document.getElementById('login-btn').hidden = true;
-      updateStatus('Authentication successful! Setting up player...');
+      updateStatus('Authentication successful! You can now search for songs and discover similar music.');
       setupPlayer();
       
       // Clean up URL
@@ -548,7 +730,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } else {
     // No token or code, show login button
-    updateStatus('Please login to Spotify to start playing music');
+    updateStatus('Please login to Spotify to search for songs and discover similar music');
     document.getElementById('login-btn').onclick = loginWithSpotify;
   }
   
@@ -633,6 +815,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   
+  // Song search functionality
+  document.getElementById('song-search-btn').onclick = () => {
+    const query = document.getElementById('song-search-input').value.trim();
+    if (!query) {
+      alert('Please enter a search term');
+      return;
+    }
+    
+    if (!accessToken) {
+      alert('Please login to Spotify first');
+      return;
+    }
+    
+    searchSongs(query);
+  };
+  
+  // Allow Enter key to submit song search
+  document.getElementById('song-search-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById('song-search-btn').click();
+    }
+  });
+  
   // Test auth button
   document.getElementById('test-auth-btn').onclick = async () => {
     // Initialize PKCE values for testing
@@ -663,7 +868,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     logoutBtn.onclick = () => {
       clearSpotifyToken();
       accessToken = null;
-      updateStatus('Logged out. Please login to Spotify to start playing music');
+      updateStatus('Logged out. Please login to Spotify to search for songs and discover similar music');
       document.getElementById('login-btn').hidden = false;
       if (player && player.disconnect) player.disconnect();
     };
