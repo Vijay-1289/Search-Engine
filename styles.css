@@ -284,18 +284,20 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-/* Histogram Animation */
+/* Liquid Glass Equalizer Animation for Timeline */
 .seek-bar-container {
   position: relative;
   flex: 1;
   height: 32px;
-  background: rgba(0,0,0,0.7);
-  border-radius: 8px;
+  background: rgba(255,255,255,0.08); /* subtle white glass, not black */
+  border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.4);
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.10);
   margin: 0 10px;
   display: flex;
   align-items: flex-end;
+  backdrop-filter: blur(12px) saturate(1.5);
+  border: 1.5px solid rgba(255,255,255,0.18);
 }
 
 .glossy-eq-bars {
@@ -305,16 +307,18 @@ body {
   align-items: flex-end;
   z-index: 2;
   pointer-events: none;
+  /* No background! Let the glass show through */
 }
 
 .glossy-eq-bar {
   flex: 1;
   margin: 0 1px;
-  border-radius: 4px 4px 8px 8px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.2) 20%, var(--eq-color, #fff) 60%, rgba(0,0,0,0.7) 100%);
-  box-shadow: 0 2px 8px 0 rgba(0,0,0,0.3);
+  border-radius: 8px 8px 18px 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.25) 20%, var(--eq-color, #fff) 60%, rgba(255,255,255,0.10) 100%);
+  box-shadow: 0 2px 16px 0 rgba(0,0,0,0.10), 0 0 8px 2px var(--eq-color, #fff);
   transition: height 0.2s cubic-bezier(.4,2,.6,1), background 0.3s;
-  opacity: 0.95;
+  opacity: 0.85;
+  filter: blur(0.5px) brightness(1.2) saturate(1.3);
 }
 
 .glossy-eq-bar.red { --eq-color: #ff3c3c; }
@@ -328,7 +332,6 @@ body {
 /* Hide the old histogram bars */
 .histogram-bars { display: none !important; }
 
-/* Seek bar and progress overlay above equalizer */
 #seek-bar {
   position: absolute;
   top: 0; left: 0; width: 100%; height: 100%;
@@ -338,11 +341,11 @@ body {
 .seek-bar-progress {
   position: absolute;
   top: 0; left: 0; height: 100%;
-  background: linear-gradient(90deg, #1DB954, #1ed760);
-  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(29,185,84,0.25), rgba(30,215,96,0.18));
+  border-radius: 18px;
   transition: width 0.1s ease;
   z-index: 2;
-  opacity: 0.5;
+  opacity: 0.7;
 }
 
 .player-title {
