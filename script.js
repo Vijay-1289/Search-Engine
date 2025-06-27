@@ -462,11 +462,33 @@ function showLoading(show) {
 }
 
 // --- Patch setupPlayer ---
-const originalSetupPlayer = setupPlayer;
-setupPlayer = function() {
-  originalSetupPlayer.apply(this, arguments);
+function setupPlayer() {
+  if (!accessToken) {
+    updateStatus('No access token available', true);
+    return;
+  }
+
+  updateStatus('Connecting to your Spotify app...');
+
+  fetchAvailableDevices().then(devices => {
+    if (!devices.length) {
+      updateStatus('No active Spotify device found. Open the Spotify app on your PC/phone and start playing any song, then click Refresh Devices.', true);
+      showDeviceSelector([]);
+      return;
+    }
+    // Default to first device if none selected
+    if (!deviceId || !devices.some(d => d.id === deviceId)) {
+      deviceId = devices[0].id;
+    }
+    showDeviceSelector(devices);
+    updateStatus('Connected! You can now control your Spotify app from here.');
+  }).catch(err => {
+    updateStatus('Failed to connect to your Spotify app. Please try again.', true);
+    showDeviceSelector([]);
+  });
+  // Always refresh device list after setup
   setTimeout(() => updateDeviceList(), 1200);
-};
+}
 
 // --- Patch initialization ---
 document.addEventListener('DOMContentLoaded', function() {
@@ -1314,72 +1336,3 @@ function displayFeaturedPlaylists(playlists) {
 
   container.innerHTML = playlistsHTML;
 }
-
-// --- Device Selection ---
-async function fetchAvailableDevices() {
-  if (!accessToken) return [];
-  try {
-    const response = await makeSpotifyRequest('https://api.spotify.com/v1/me/player/devices');
-    if (!response.ok) throw new Error('Failed to fetch devices');
-    const data = await response.json();
-    return data.devices || [];
-  } catch (e) {
-    console.error('Error fetching devices:', e);
-    return [];
-  }
-}
-
-function showDeviceSelector(devices) {
-  let container = document.getElementById('device-selector-container');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'device-selector-container';
-    container.style.margin = '10px 0';
-    const playerInfo = document.querySelector('.player-info');
-    if (playerInfo) playerInfo.insertBefore(container, playerInfo.firstChild);
-  }
-  if (!devices.length) {
-    container.innerHTML = '<div style="color: #b00; font-size: 13px;">No active Spotify device found.<br>Open the Spotify app on your PC/phone and start playing any song once, then click <b>Refresh Devices</b>.</div>' +
-      '<button id="refresh-devices-btn" style="margin-top:6px;">Refresh Devices</button>';
-    document.getElementById('refresh-devices-btn').onclick = updateDeviceList;
-    return;
-  }
-  let html = '<label for="device-select">Playback Device:</label> <select id="device-select">';
-  devices.forEach(d => {
-    html += `<option value="${d.id}"${d.is_active ? ' selected' : ''}>${d.name} (${d.type}${d.is_active ? ', Active' : ''})</option>`;
-  });
-  html += '</select>';
-  html += ' <button id="refresh-devices-btn">Refresh Devices</button>';
-  container.innerHTML = html;
-  document.getElementById('device-select').onchange = function() {
-    deviceId = this.value;
-    updateStatus('Selected device: ' + this.options[this.selectedIndex].text);
-  };
-  document.getElementById('refresh-devices-btn').onclick = updateDeviceList;
-}
-
-async function updateDeviceList() {
-  const devices = await fetchAvailableDevices();
-  if (devices.length) {
-    // Default to first device if none selected
-    if (!deviceId || !devices.some(d => d.id === deviceId)) {
-      deviceId = devices[0].id;
-    }
-  }
-  showDeviceSelector(devices);
-}
-
-// Call updateDeviceList after login and after player setup
-// In initialization, after setupPlayer():
-// setTimeout(() => updateDeviceList(), 1200);
-// Also call updateDeviceList when user clicks refresh devices
-
-// Call updateDeviceList after login and after player setup
-// In initialization, after setupPlayer():
-// setTimeout(() => updateDeviceList(), 1200);
-// Also call updateDeviceList when user clicks refresh devices
-
-// Call updateDeviceList after login and after player setup
-// In initialization, after setupPlayer():
-// setTimeout(() => updateDeviceList(), 1200);
-// Also call updateDeviceList when user clicks refresh devices 
