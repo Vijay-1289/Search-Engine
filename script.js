@@ -952,35 +952,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
   
-  // Playlist loading
-  document.getElementById('spotify-url-btn').onclick = () => {
-    const url = document.getElementById('spotify-url-input').value.trim();
-    if (!url) {
-      alert('Please enter a Spotify playlist URL');
-      return;
-    }
-    
-    const playlistId = extractSpotifyPlaylistId(url);
-    if (!playlistId) {
-      alert('Please enter a valid Spotify playlist URL, URI, or ID.');
-      return;
-    }
-    
-    if (!deviceId) {
-      alert('Please wait for the player to be ready, then try again.');
-      return;
-    }
-    
-    loadPlaylist(playlistId);
-  };
-  
-  // Allow Enter key to submit playlist URL
-  document.getElementById('spotify-url-input').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      document.getElementById('spotify-url-btn').click();
-    }
-  });
-  
   // Song search functionality
   document.getElementById('song-search-btn').onclick = () => {
     const query = document.getElementById('song-search-input').value.trim();
