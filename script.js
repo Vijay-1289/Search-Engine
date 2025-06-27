@@ -37,10 +37,12 @@ const scopes = [
   'user-read-private',
   'user-modify-playback-state',
   'user-read-playback-state',
+  'user-read-currently-playing',
   'playlist-read-private',
   'playlist-read-collaborative',
   'user-read-recently-played',
   'user-top-read',
+  'user-library-read',
 ];
 let player, deviceId, accessToken;
 let seekBarUpdateTimer = null; // Timer for updating seek bar
@@ -117,12 +119,36 @@ function clearSpotifyToken() {
 
 async function checkTokenValidity(token) {
   try {
+    console.log('Checking token validity...');
     const response = await fetch('https://api.spotify.com/v1/me', {
       headers: {
         'Authorization': `Bearer ${token}`
       }
     });
-    return response.ok;
+    
+    console.log('Token validation response status:', response.status);
+    
+    if (response.status === 403) {
+      console.error('403 Forbidden - This usually means insufficient scopes or account restrictions');
+      const errorText = await response.text();
+      console.error('403 Error details:', errorText);
+      return false;
+    }
+    
+    if (response.status === 401) {
+      console.error('401 Unauthorized - Token is invalid or expired');
+      return false;
+    }
+    
+    if (!response.ok) {
+      console.error(`Token validation failed with status: ${response.status}`);
+      return false;
+    }
+    
+    const userData = await response.json();
+    console.log('Token is valid for user:', userData.display_name);
+    return true;
+    
   } catch (error) {
     console.error('Error checking token validity:', error);
     return false;
@@ -144,12 +170,22 @@ async function makeSpotifyRequest(url, options = {}) {
 
   if (response.status === 401) {
     // Token expired, clear it and throw error
+    console.error('401 Unauthorized - Token expired');
     clearSpotifyToken();
     accessToken = null;
     player = null;
     document.getElementById('login-btn').hidden = false;
     updateStatus('Session expired. Please login again.', true);
     throw new Error('Authentication expired');
+  }
+
+  if (response.status === 403) {
+    // Forbidden - usually means insufficient scopes
+    console.error('403 Forbidden - Insufficient scopes or account restrictions');
+    const errorText = await response.text();
+    console.error('403 Error details:', errorText);
+    updateStatus('Access denied. Please check your Spotify account permissions.', true);
+    throw new Error('Insufficient permissions');
   }
 
   return response;
@@ -1058,6 +1094,89 @@ async function displayCurrentUser() {
   return null;
 }
 
+// Debug function to help troubleshoot authentication issues
+async function debugSpotifyAuth() {
+  console.log('=== SPOTIFY AUTH DEBUG ===');
+  console.log('Client ID:', clientId);
+  console.log('Redirect URI:', redirectUri);
+  console.log('Scopes:', scopes);
+  console.log('Access Token exists:', !!accessToken);
+  console.log('Access Token length:', accessToken ? accessToken.length : 0);
+  console.log('Player exists:', !!player);
+  console.log('Device ID:', deviceId);
+  
+  if (accessToken) {
+    try {
+      console.log('Testing token with /v1/me endpoint...');
+      const response = await fetch('https://api.spotify.com/v1/me', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (response.ok) {
+        const userData = await response.json();
+        console.log('User data:', userData);
+      } else {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+      }
+    } catch (error) {
+      console.error('Error testing token:', error);
+    }
+  }
+  
+  console.log('=== END DEBUG ===');
+}
+
+// Add debug function to window for console access
+window.debugSpotifyAuth = debugSpotifyAuth;
+
+// Function to completely clear all authentication data
+function clearAllAuthData() {
+  console.log('Clearing all authentication data...');
+  
+  // Clear tokens
+  clearSpotifyToken();
+  sessionStorage.removeItem('spotify_code_verifier');
+  
+  // Clear variables
+  accessToken = null;
+  currentTrackId = null;
+  codeVerifier = '';
+  codeChallenge = '';
+  
+  // Disconnect player
+  if (player && player.disconnect) {
+    player.disconnect();
+  }
+  player = null;
+  deviceId = null;
+  
+  // Clear similar songs queue
+  clearSimilarSongsQueue();
+  
+  // Reset UI
+  document.getElementById('login-btn').hidden = false;
+  document.getElementById('switch-account-btn').hidden = true;
+  document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading your playlists...</div>';
+  showSearchResults(false);
+  animateGlossyEqBars(false);
+  
+  // Clear URL parameters
+  window.history.replaceState({}, document.title, window.location.pathname);
+  
+  updateStatus('All authentication data cleared. Please login again.');
+  
+  console.log('All authentication data cleared');
+}
+
+// Add to window for console access
+window.clearAllAuthData = clearAllAuthData;
+
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   const params = getHashParams();
@@ -1084,10 +1203,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Display current user info
       setTimeout(() => displayCurrentUser(), 1500);
     } else {
-      // Token is expired, clear it and show login button
+      // Token is expired or invalid, clear it and show login button
       clearSpotifyToken();
-      updateStatus('Session expired. Please login again.');
+      updateStatus('Session expired or invalid. Please login again.');
+      document.getElementById('login-btn').hidden = false;
+      document.getElementById('switch-account-btn').hidden = true;
       document.getElementById('login-btn').onclick = loginWithSpotify;
+      
+      // Clear any existing player state
+      if (player && player.disconnect) {
+        player.disconnect();
+      }
+      player = null;
+      deviceId = null;
     }
   } else if (params.access_token) {
     // Handle legacy implicit flow (if somehow still working)
@@ -1284,10 +1412,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Test auth button
   document.getElementById('test-auth-btn').onclick = async () => {
-    // Initialize PKCE values for testing
-    codeVerifier = generateCodeVerifier(128);
-    codeChallenge = await generateCodeChallenge(codeVerifier);
-    testSpotifyAuth();
+    console.log('=== MANUAL AUTH TEST ===');
+    await debugSpotifyAuth();
+    
+    if (!accessToken) {
+      updateStatus('No access token found. Please login first.', true);
+      return;
+    }
+    
+    try {
+      updateStatus('Testing authentication...');
+      const user = await getCurrentUserProfile();
+      if (user) {
+        updateStatus(`Authentication successful! Logged in as: ${user.display_name}`);
+      } else {
+        updateStatus('Authentication failed. Please try logging in again.', true);
+      }
+    } catch (error) {
+      console.error('Auth test failed:', error);
+      updateStatus('Authentication test failed. Please try logging in again.', true);
+    }
+  };
+  
+  // Clear auth button
+  document.getElementById('clear-auth-btn').onclick = () => {
+    clearAllAuthData();
   };
   
   // Cleanup timer when page is unloaded
