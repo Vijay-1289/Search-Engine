@@ -27,23 +27,14 @@ function openApp(url) {
 }
 
 // Spotify Auth and Player Logic
-// Using Authorization Code with PKCE flow (modern approach)
+// Using Client Credentials flow (no user login required)
 // Reference: https://developer.spotify.com/documentation/web-api
 const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec';
+const clientSecret = '14a38d3c65e147279cd776d81c511425';
 const redirectUri = 'https://mytoolengine.netlify.app/';
-const scopes = [
-  'streaming',
-  'user-read-email',
-  'user-read-private',
-  'user-modify-playback-state',
-  'user-read-playback-state',
-  'user-read-currently-playing',
-  'playlist-read-private',
-  'playlist-read-collaborative',
-  'user-read-recently-played',
-  'user-top-read',
-  'user-library-read',
-];
+
+// For client credentials flow, we don't need user-specific scopes
+// We'll use public endpoints that don't require user authentication
 let player, deviceId, accessToken;
 let seekBarUpdateTimer = null; // Timer for updating seek bar
 let currentTrackDuration = 0; // Store current track duration
@@ -191,78 +182,58 @@ async function makeSpotifyRequest(url, options = {}) {
   return response;
 }
 
-async function loginWithSpotify() {
-  // Clear any existing errors
-  updateStatus('Preparing Spotify authentication...');
-  
+// Client Credentials Authentication (no user login required)
+async function getClientCredentialsToken() {
   try {
-    // Generate PKCE values
-    codeVerifier = generateCodeVerifier(128);
-    codeChallenge = await generateCodeChallenge(codeVerifier);
+    console.log('Getting client credentials token...');
+    updateStatus('Authenticating with Spotify...');
     
-    // Store code verifier in session storage
-    sessionStorage.setItem('spotify_code_verifier', codeVerifier);
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + btoa(clientId + ':' + clientSecret)
+      },
+      body: 'grant_type=client_credentials'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Token request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log('Client credentials token received');
     
-    // Use Authorization Code flow with PKCE
-    const responseType = 'code';
-    const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&code_challenge=${codeChallenge}&code_challenge_method=S256&show_dialog=true`;
+    // Store the access token
+    accessToken = data.access_token;
+    saveSpotifyToken(accessToken);
     
-    console.log('=== SPOTIFY AUTH DEBUG (PKCE) ===');
-    console.log('Client ID:', clientId);
-    console.log('Redirect URI:', redirectUri);
-    console.log('Response Type:', responseType);
-    console.log('Code Challenge Method: S256');
-    console.log('Full URL:', url);
-    console.log('================================');
-    
-    updateStatus('Redirecting to Spotify...');
-    window.location = url;
+    return data.access_token;
     
   } catch (error) {
-    console.error('Error preparing Spotify auth:', error);
-    updateStatus('Failed to prepare authentication. Please try again.', true);
+    console.error('Error getting client credentials token:', error);
+    updateStatus('Authentication failed. Please check your credentials.', true);
+    throw error;
   }
 }
 
-async function switchSpotifyAccount() {
-  // Clear current session
-  clearSpotifyToken();
-  clearSimilarSongsQueue();
-  accessToken = null;
-  currentTrackId = null;
-  
-  // Disconnect current player
-  if (player && player.disconnect) {
-    player.disconnect();
-    player = null;
+// Simplified login function that uses client credentials
+async function loginWithSpotify() {
+  try {
+    updateStatus('Setting up Spotify access...');
+    await getClientCredentialsToken();
+    
+    document.getElementById('login-btn').hidden = true;
+    document.getElementById('switch-account-btn').hidden = true; // No need for account switching
+    updateStatus('Ready! You can now search for songs and discover music.');
+    
+    // Load featured playlists instead of user playlists
+    setTimeout(() => loadFeaturedPlaylists(), 1000);
+    
+  } catch (error) {
+    console.error('Login failed:', error);
+    updateStatus('Failed to authenticate. Please try again.', true);
   }
-  
-  // Stop any timers
-  stopSeekBarTimer();
-  if (glossyEqAnimTimer) {
-    clearInterval(glossyEqAnimTimer);
-    glossyEqAnimTimer = null;
-  }
-  
-  // Reset UI
-  document.getElementById('login-btn').hidden = false;
-  document.getElementById('switch-account-btn').hidden = true;
-  document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading your playlists...</div>';
-  
-  // Clear search results
-  showSearchResults(false);
-  
-  // Reset player UI
-  document.getElementById('player-title').textContent = 'Spotify Music Player';
-  document.getElementById('current-time').textContent = '00:00';
-  document.getElementById('duration').textContent = '00:00';
-  document.getElementById('seek-bar').value = 0;
-  animateGlossyEqBars(false);
-  
-  updateStatus('Account switched. Please login with your new Spotify account.');
-  
-  // Start new authentication flow
-  await loginWithSpotify();
 }
 
 async function exchangeCodeForToken(code) {
@@ -1010,66 +981,8 @@ function getQueueStatus() {
 }
 
 // --- Playlist Management Functions ---
-async function fetchUserPlaylists() {
-  if (!accessToken) {
-    updateStatus('Please login to Spotify first', true);
-    return;
-  }
-
-  try {
-    updateStatus('Loading your playlists...');
-    
-    // Fetch user's playlists (limit to 20 for performance)
-    const response = await fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      displayUserPlaylists(data.items);
-      updateStatus(`Loaded ${data.items.length} playlists`);
-    } else if (response.status === 403) {
-      // For free accounts, playlist access might be restricted
-      console.log('Playlist access restricted (free account limitation)');
-      displayUserPlaylists([]);
-      updateStatus('Playlist access not available with free account');
-    } else {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-  } catch (error) {
-    console.error('Error fetching playlists:', error);
-    if (error.message === 'Authentication expired') {
-      updateStatus('Session expired. Please login again.', true);
-    } else {
-      updateStatus('Failed to load playlists. Please try again.', true);
-    }
-  }
-}
-
-function displayUserPlaylists(playlists) {
-  const container = document.getElementById('playlists-container');
-  
-  if (!playlists || playlists.length === 0) {
-    container.innerHTML = '<div class="no-playlists">No playlists found. Create some playlists in Spotify!</div>';
-    return;
-  }
-
-  const playlistsHTML = playlists.map(playlist => `
-    <div class="playlist-item">
-      <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/45x45?text=🎵'}" alt="${playlist.name}">
-      <div class="playlist-info">
-        <div class="playlist-name">${playlist.name}</div>
-        <div class="playlist-owner">by ${playlist.owner.display_name}</div>
-      </div>
-      <button class="playlist-play" onclick="playPlaylist('${playlist.uri}')" title="Play Playlist">▶️</button>
-    </div>
-  `).join('');
-
-  container.innerHTML = playlistsHTML;
-}
+// Note: fetchUserPlaylists() and displayUserPlaylists() have been replaced with
+// loadFeaturedPlaylists() and displayFeaturedPlaylists() for client credentials flow
 
 async function playPlaylist(playlistUri) {
   if (!deviceId) {
@@ -1115,63 +1028,18 @@ async function playPlaylist(playlistUri) {
   }
 }
 
-async function getCurrentUserProfile() {
-  if (!accessToken) return null;
-  
-  try {
-    // Try to get user profile with basic scopes that work for free accounts
-    const response = await fetch('https://api.spotify.com/v1/me', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-    
-    if (response.ok) {
-      const user = await response.json();
-      return user;
-    } else if (response.status === 403) {
-      // For free accounts, some scopes might be restricted
-      console.log('User profile access restricted (free account limitation)');
-      return {
-        display_name: 'Spotify User',
-        email: 'user@spotify.com',
-        id: 'free_user',
-        product: 'free'
-      };
-    } else {
-      console.error('Error getting user profile:', response.status, response.statusText);
-    }
-  } catch (error) {
-    console.error('Error getting user profile:', error);
-  }
-  return null;
-}
-
-async function displayCurrentUser() {
-  const user = await getCurrentUserProfile();
-  if (user) {
-    console.log(`Logged in as: ${user.display_name} (${user.email})`);
-    // You can add UI to display the current user if needed
-    return user;
-  }
-  return null;
-}
-
 // Debug function to help troubleshoot authentication issues
 async function debugSpotifyAuth() {
   console.log('=== SPOTIFY AUTH DEBUG ===');
   console.log('Client ID:', clientId);
   console.log('Redirect URI:', redirectUri);
-  console.log('Scopes:', scopes);
   console.log('Access Token exists:', !!accessToken);
   console.log('Access Token length:', accessToken ? accessToken.length : 0);
-  console.log('Player exists:', !!player);
-  console.log('Device ID:', deviceId);
   
   if (accessToken) {
     try {
-      console.log('Testing token with /v1/me endpoint...');
-      const response = await fetch('https://api.spotify.com/v1/me', {
+      console.log('Testing token with search endpoint...');
+      const response = await fetch('https://api.spotify.com/v1/search?q=test&type=track&limit=1', {
         headers: {
           'Authorization': `Bearer ${accessToken}`
         }
@@ -1181,8 +1049,8 @@ async function debugSpotifyAuth() {
       console.log('Response headers:', Object.fromEntries(response.headers.entries()));
       
       if (response.ok) {
-        const userData = await response.json();
-        console.log('User data:', userData);
+        const data = await response.json();
+        console.log('Search test successful:', data);
       } else {
         const errorText = await response.text();
         console.error('Error response:', errorText);
@@ -1225,7 +1093,7 @@ function clearAllAuthData() {
   // Reset UI
   document.getElementById('login-btn').hidden = false;
   document.getElementById('switch-account-btn').hidden = true;
-  document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading your playlists...</div>';
+  document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
   showSearchResults(false);
   animateGlossyEqBars(false);
   
@@ -1242,13 +1110,7 @@ window.clearAllAuthData = clearAllAuthData;
 
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
-  const params = getHashParams();
-  const queryParams = getQueryParams();
-  
-  // Debug: Log the URL parameters
-  console.log('URL hash params:', params);
-  console.log('URL query params:', queryParams);
-  console.log('Current URL:', window.location.href);
+  console.log('Initializing Spotify app with client credentials...');
   
   // Check for saved token first
   const savedToken = getSavedSpotifyToken();
@@ -1258,124 +1120,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isValid) {
       accessToken = savedToken;
       document.getElementById('login-btn').hidden = true;
-      document.getElementById('switch-account-btn').hidden = false;
-      updateStatus('Welcome back! You can now search for songs and discover similar music.');
-      setupPlayer();
-      // Load user's playlists
-      setTimeout(() => fetchUserPlaylists(), 1000);
-      // Display current user info
-      setTimeout(() => displayCurrentUser(), 1500);
+      document.getElementById('switch-account-btn').hidden = true; // No account switching needed
+      updateStatus('Welcome back! You can search for songs and discover music.');
+      // Load featured playlists
+      setTimeout(() => loadFeaturedPlaylists(), 1000);
     } else {
-      // Token is expired or invalid, clear it and show login button
+      // Token is expired, clear it and show login button
       clearSpotifyToken();
-      updateStatus('Session expired or invalid. Please login again.');
+      updateStatus('Session expired. Please login again.');
       document.getElementById('login-btn').hidden = false;
-      document.getElementById('switch-account-btn').hidden = true;
-      document.getElementById('login-btn').onclick = loginWithSpotify;
-      
-      // Clear any existing player state
-      if (player && player.disconnect) {
-        player.disconnect();
-      }
-      player = null;
-      deviceId = null;
-    }
-  } else if (params.access_token) {
-    // Handle legacy implicit flow (if somehow still working)
-    accessToken = params.access_token;
-    console.log('Access token received (implicit flow), length:', accessToken.length);
-    document.getElementById('login-btn').hidden = true;
-    document.getElementById('switch-account-btn').hidden = false;
-    updateStatus('Authentication successful! You can now search for songs and discover similar music.');
-    setupPlayer();
-    saveSpotifyToken(accessToken);
-    // Load user's playlists
-    setTimeout(() => fetchUserPlaylists(), 1000);
-    // Display current user info
-    setTimeout(() => displayCurrentUser(), 1500);
-  } else if (queryParams.code) {
-    // Handle authorization code flow (modern approach)
-    try {
-      console.log('Authorization code received, exchanging for token...');
-      updateStatus('Authorization code received, exchanging for token...');
-      
-      const token = await exchangeCodeForToken(queryParams.code);
-      console.log('Token exchange successful, length:', token.length);
-      
-      document.getElementById('login-btn').hidden = true;
-      document.getElementById('switch-account-btn').hidden = false;
-      updateStatus('Authentication successful! You can now search for songs and discover similar music.');
-      setupPlayer();
-      
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-      
-      saveSpotifyToken(token);
-      
-      // Load user's playlists
-      setTimeout(() => fetchUserPlaylists(), 1000);
-      // Display current user info
-      setTimeout(() => displayCurrentUser(), 1500);
-      
-    } catch (error) {
-      console.error('Token exchange failed:', error);
-      updateStatus('Authentication failed. Please try again.', true);
-      document.getElementById('login-btn').hidden = false;
-      document.getElementById('switch-account-btn').hidden = false;
-      document.getElementById('login-btn').textContent = 'Try Again';
-      document.getElementById('login-btn').onclick = loginWithSpotify;
-    }
-  } else if (params.error || queryParams.error) {
-    // Handle authentication errors
-    const error = params.error || queryParams.error;
-    console.error('Spotify auth error:', error);
-    let errorMessage = 'Authentication failed';
-    let showRetryButton = false;
-    
-    switch (error) {
-      case 'access_denied':
-        errorMessage = 'Access denied. Please allow the app to access your Spotify account.';
-        showRetryButton = true;
-        break;
-      case 'invalid_client':
-        errorMessage = 'Invalid client configuration. Please check your app settings.';
-        break;
-      case 'invalid_request':
-        errorMessage = 'Invalid request. Please try again.';
-        showRetryButton = true;
-        break;
-      case 'server_error':
-        errorMessage = 'Spotify server error. Please try again later.';
-        showRetryButton = true;
-        break;
-      case 'temporarily_unavailable':
-        errorMessage = 'Spotify service temporarily unavailable. Please try again later.';
-        showRetryButton = true;
-        break;
-      case 'unsupported_response_type':
-        errorMessage = 'Using modern Authorization Code flow with PKCE. Please try again.';
-        showRetryButton = true;
-        break;
-      default:
-        errorMessage = `Authentication error: ${error}`;
-        showRetryButton = true;
-    }
-    
-    updateStatus(errorMessage, true);
-    
-    if (showRetryButton) {
-      document.getElementById('login-btn').hidden = false;
-      document.getElementById('switch-account-btn').hidden = false;
-      document.getElementById('login-btn').textContent = 'Try Again';
-      document.getElementById('login-btn').onclick = loginWithSpotify;
-    } else {
-      document.getElementById('login-btn').hidden = false;
-      document.getElementById('switch-account-btn').hidden = false;
       document.getElementById('login-btn').onclick = loginWithSpotify;
     }
   } else {
-    // No token or code, show login button
-    updateStatus('Please login to Spotify to search for songs and discover similar music');
+    // No token, show login button
+    updateStatus('Click "Login with Spotify" to start discovering music!');
     document.getElementById('login-btn').onclick = loginWithSpotify;
   }
   
@@ -1467,7 +1225,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Refresh playlists button
   document.getElementById('refresh-playlists-btn').onclick = () => {
-    fetchUserPlaylists();
+    loadFeaturedPlaylists();
   };
   
   // Initialize histogram bars
@@ -1526,16 +1284,69 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearSimilarSongsQueue();
       accessToken = null;
       currentTrackId = null;
-      updateStatus('Logged out. Please login to Spotify to search for songs and discover similar music');
+      updateStatus('Logged out. Please login to Spotify to search for songs and discover music');
       document.getElementById('login-btn').hidden = false;
       document.getElementById('switch-account-btn').hidden = true;
       if (player && player.disconnect) player.disconnect();
       player = null;
       
       // Reset UI
-      document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading your playlists...</div>';
+      document.getElementById('playlists-container').innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
       showSearchResults(false);
       animateGlossyEqBars(false);
     };
   }
-}); 
+});
+
+// Load featured playlists that any user can access
+async function loadFeaturedPlaylists() {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    updateStatus('Loading featured playlists...');
+    
+    // Get featured playlists (public playlists that any user can access)
+    const response = await fetch('https://api.spotify.com/v1/browse/featured-playlists?limit=20', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      displayFeaturedPlaylists(data.playlists.items);
+      updateStatus(`Loaded ${data.playlists.items.length} featured playlists`);
+    } else {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+  } catch (error) {
+    console.error('Error fetching featured playlists:', error);
+    updateStatus('Failed to load playlists. Please try again.', true);
+  }
+}
+
+function displayFeaturedPlaylists(playlists) {
+  const container = document.getElementById('playlists-container');
+  
+  if (!playlists || playlists.length === 0) {
+    container.innerHTML = '<div class="no-playlists">No featured playlists found.</div>';
+    return;
+  }
+
+  const playlistsHTML = playlists.map(playlist => `
+    <div class="playlist-item">
+      <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/45x45?text=🎵'}" alt="${playlist.name}">
+      <div class="playlist-info">
+        <div class="playlist-name">${playlist.name}</div>
+        <div class="playlist-owner">by ${playlist.owner.display_name}</div>
+      </div>
+      <button class="playlist-play" onclick="playPlaylist('${playlist.uri}')" title="Play Playlist">▶️</button>
+    </div>
+  `).join('');
+
+  container.innerHTML = playlistsHTML;
+} 
