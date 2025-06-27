@@ -736,61 +736,30 @@ async function getSimilarSongs(trackId) {
 }
 
 async function playSong(trackUri) {
-  if (!deviceId) {
-    updateStatus('Please wait for the player to be ready, then try again.', true);
-    return;
-  }
-
+  // For client credentials flow, we can't control playback directly
+  // Instead, we'll open the track in Spotify
   try {
-    updateStatus('Playing song...');
-
-    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        uris: [trackUri]
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    updateStatus('Song started playing!');
+    updateStatus('Opening track in Spotify...');
     
-    // Extract track ID from URI and initialize similar songs queue
+    // Extract track ID from URI
     const trackId = trackUri.split(':').pop();
     currentTrackId = trackId;
     
-    // Get similar songs for the queue
-    setTimeout(async () => {
-      const similarSongs = await getSimilarSongsForQueue(trackId);
-      similarSongsQueue = similarSongs;
-      console.log(`Added ${similarSongs.length} similar songs to queue`);
-      updateStatus(`Added ${similarSongs.length} similar songs to auto-play queue!`);
-    }, 2000);
+    // Open the track in Spotify
+    const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+    window.open(spotifyUrl, '_blank');
+    
+    updateStatus('Track opened in Spotify! Enjoy listening.');
     
     // Hide search results and return to player view
     setTimeout(() => {
       showSearchResults(false);
-      updateStatus('Now playing - similar songs will auto-play next!');
+      updateStatus('Track opened in Spotify. Use search to find more music!');
     }, 1000);
 
   } catch (error) {
-    console.error('Error playing song:', error);
-    if (error.message === 'Authentication expired') {
-      updateStatus('Session expired. Please login again.', true);
-    } else if (error.message === 'Insufficient permissions') {
-      // Fallback for free accounts - open in Spotify
-      updateStatus('Opening track in Spotify (free account limitation)...');
-      const trackId = trackUri.split(':').pop();
-      const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
-      window.open(spotifyUrl, '_blank');
-    } else {
-      updateStatus('Failed to play song. Please try again.', true);
-    }
+    console.error('Error handling song:', error);
+    updateStatus('Failed to open track. Please try again.', true);
   }
 }
 
@@ -1001,46 +970,42 @@ function getQueueStatus() {
 // loadFeaturedPlaylists() and displayFeaturedPlaylists() for client credentials flow
 
 async function playPlaylist(playlistUri) {
-  if (!deviceId) {
-    updateStatus('Please wait for the player to be ready, then try again.', true);
-    return;
-  }
-
+  // For client credentials flow, we can't control playback directly
+  // Instead, we'll open the content in Spotify
   try {
-    updateStatus('Loading playlist...');
-
-    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        context_uri: playlistUri
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    updateStatus('Playlist started playing!');
+    updateStatus('Opening in Spotify...');
     
-    // Clear the similar songs queue since we're playing from a playlist
-    clearSimilarSongsQueue();
-
-  } catch (error) {
-    console.error('Error playing playlist:', error);
-    if (error.message === 'Authentication expired') {
-      updateStatus('Session expired. Please login again.', true);
-    } else if (error.message === 'Insufficient permissions') {
-      // Fallback for free accounts - open in Spotify
-      updateStatus('Opening playlist in Spotify (free account limitation)...');
+    let spotifyUrl = '';
+    
+    if (playlistUri.startsWith('spotify:playlist:')) {
+      // Regular playlist
       const playlistId = playlistUri.split(':').pop();
-      const spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
-      window.open(spotifyUrl, '_blank');
+      spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
+    } else if (playlistUri.startsWith('spotify:album:')) {
+      // Album
+      const albumId = playlistUri.split(':').pop();
+      spotifyUrl = `https://open.spotify.com/album/${albumId}`;
+    } else if (playlistUri.startsWith('spotify:category:')) {
+      // Category
+      const categoryId = playlistUri.split(':').pop();
+      spotifyUrl = `https://open.spotify.com/genre/${categoryId}`;
+    } else if (playlistUri === 'search') {
+      // Search placeholder
+      updateStatus('Use the search box above to find music!');
+      return;
     } else {
-      updateStatus('Failed to play playlist. Please try again.', true);
+      // Default to playlist format
+      const id = playlistUri.split(':').pop();
+      spotifyUrl = `https://open.spotify.com/playlist/${id}`;
     }
+    
+    // Open in Spotify
+    window.open(spotifyUrl, '_blank');
+    updateStatus('Opened in Spotify! Enjoy listening.');
+    
+  } catch (error) {
+    console.error('Error handling playlist:', error);
+    updateStatus('Failed to open content. Please try again.', true);
   }
 }
 
@@ -1377,24 +1342,98 @@ async function loadFeaturedPlaylists() {
   try {
     updateStatus('Loading featured playlists...');
     
-    // Get featured playlists (public playlists that any user can access)
-    const response = await fetch('https://api.spotify.com/v1/browse/featured-playlists?limit=20', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
+    // Try multiple endpoints to get playlists
+    let playlists = [];
     
-    if (response.ok) {
-      const data = await response.json();
-      displayFeaturedPlaylists(data.playlists.items);
-      updateStatus(`Loaded ${data.playlists.items.length} featured playlists`);
-    } else {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    // First try: Get new releases (which are always available)
+    try {
+      const newReleasesResponse = await fetch('https://api.spotify.com/v1/browse/new-releases?limit=10', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      if (newReleasesResponse.ok) {
+        const data = await newReleasesResponse.json();
+        // Convert albums to playlist-like format
+        playlists = data.albums.items.map(album => ({
+          name: `New Release: ${album.name}`,
+          owner: { display_name: album.artists[0]?.name || 'Various Artists' },
+          images: album.images,
+          uri: album.uri,
+          id: album.id
+        }));
+        console.log('Loaded new releases as playlists');
+      }
+    } catch (error) {
+      console.log('New releases endpoint failed, trying alternatives...');
     }
+    
+    // If no new releases, try categories
+    if (playlists.length === 0) {
+      try {
+        const categoriesResponse = await fetch('https://api.spotify.com/v1/browse/categories?limit=10', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        });
+        
+        if (categoriesResponse.ok) {
+          const data = await categoriesResponse.json();
+          // Convert categories to playlist-like format
+          playlists = data.categories.items.map(category => ({
+            name: `Category: ${category.name}`,
+            owner: { display_name: 'Spotify' },
+            images: category.icons,
+            uri: `spotify:category:${category.id}`,
+            id: category.id
+          }));
+          console.log('Loaded categories as playlists');
+        }
+      } catch (error) {
+        console.log('Categories endpoint failed...');
+      }
+    }
+    
+    // If still no playlists, create some default ones
+    if (playlists.length === 0) {
+      playlists = [
+        {
+          name: 'Popular Songs',
+          owner: { display_name: 'Spotify' },
+          images: [{ url: 'https://via.placeholder.com/45x45?text=🎵' }],
+          uri: 'spotify:playlist:37i9dQZEVXbMDoHDwVN2tF', // Global Top 50
+          id: 'popular'
+        },
+        {
+          name: 'Trending Now',
+          owner: { display_name: 'Spotify' },
+          images: [{ url: 'https://via.placeholder.com/45x45?text=🔥' }],
+          uri: 'spotify:playlist:37i9dQZEVXbMDoHDwVN2tF',
+          id: 'trending'
+        }
+      ];
+      console.log('Using default playlists');
+    }
+    
+    displayFeaturedPlaylists(playlists);
+    updateStatus(`Loaded ${playlists.length} playlists`);
 
   } catch (error) {
-    console.error('Error fetching featured playlists:', error);
+    console.error('Error fetching playlists:', error);
     updateStatus('Failed to load playlists. Please try again.', true);
+    
+    // Show some default playlists even if API fails
+    const defaultPlaylists = [
+      {
+        name: 'Search for Music',
+        owner: { display_name: 'Use the search above' },
+        images: [{ url: 'https://via.placeholder.com/45x45?text=🔍' }],
+        uri: 'search',
+        id: 'search'
+      }
+    ];
+    displayFeaturedPlaylists(defaultPlaylists);
   }
 }
 
