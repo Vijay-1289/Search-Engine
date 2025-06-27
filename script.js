@@ -265,13 +265,12 @@ async function loginWithSpotify() {
 async function exchangeCodeForToken(code) {
   try {
     updateStatus('Exchanging authorization code for token...');
-    
     // Get the stored code verifier
     const storedCodeVerifier = sessionStorage.getItem('spotify_code_verifier');
+    console.log('[DEBUG] exchangeCodeForToken:', { code, storedCodeVerifier, redirectUri });
     if (!storedCodeVerifier) {
       throw new Error('Code verifier not found in session storage');
     }
-    
     // Exchange code for token
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -286,27 +285,22 @@ async function exchangeCodeForToken(code) {
         code_verifier: storedCodeVerifier,
       }),
     });
-    
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`Token exchange failed: ${errorData.error_description || errorData.error}`);
+      console.error('[DEBUG] Token exchange failed:', errorData, { code, storedCodeVerifier, redirectUri });
+      throw new Error(`Token exchange failed: ${errorData.error_description || errorData.error}\n[DEBUG] code: ${code}\ncode_verifier: ${storedCodeVerifier}\nredirect_uri: ${redirectUri}`);
     }
-    
     const data = await response.json();
     console.log('Token exchange successful');
-    
     // Store the access token
     accessToken = data.access_token;
     saveSpotifyToken(accessToken);
-    
     // Clean up session storage
     sessionStorage.removeItem('spotify_code_verifier');
-    
     return data.access_token;
-    
   } catch (error) {
     console.error('Error exchanging code for token:', error);
-    updateStatus('Token exchange failed. Please try again.', true);
+    updateStatus('Token exchange failed. Please try again. ' + error.message, true);
     throw error;
   }
 }
