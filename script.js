@@ -27,14 +27,25 @@ function openApp(url) {
 }
 
 // Spotify Auth and Player Logic
-// Using Client Credentials flow (no user login required)
+// Using Authorization Code with PKCE flow (modern approach)
 // Reference: https://developer.spotify.com/documentation/web-api
 const clientId = 'fd061c95ff4342eda082dd1f8a3eeaec';
 const clientSecret = '14a38d3c65e147279cd776d81c511425';
 const redirectUri = 'https://mytoolengine.netlify.app/';
+const scopes = [
+  'streaming',
+  'user-read-email',
+  'user-read-private',
+  'user-modify-playback-state',
+  'user-read-playback-state',
+  'user-read-currently-playing',
+  'playlist-read-private',
+  'playlist-read-collaborative',
+  'user-read-recently-played',
+  'user-top-read',
+  'user-library-read',
+];
 
-// For client credentials flow, we don't need user-specific scopes
-// We'll use public endpoints that don't require user authentication
 let player, deviceId, accessToken;
 let seekBarUpdateTimer = null; // Timer for updating seek bar
 let currentTrackDuration = 0; // Store current track duration
@@ -219,36 +230,35 @@ async function getClientCredentialsToken() {
 
 // Simplified login function that uses client credentials
 async function loginWithSpotify() {
+  // Clear any existing errors
+  updateStatus('Preparing Spotify authentication...');
+  
   try {
-    updateStatus('Setting up Spotify access...');
-    await getClientCredentialsToken();
+    // Generate PKCE values
+    codeVerifier = generateCodeVerifier(128);
+    codeChallenge = await generateCodeChallenge(codeVerifier);
     
-    // Check if elements exist before trying to modify them
-    const loginBtn = document.getElementById('login-btn');
-    const switchAccountBtn = document.getElementById('switch-account-btn');
+    // Store code verifier in session storage
+    sessionStorage.setItem('spotify_code_verifier', codeVerifier);
     
-    if (loginBtn) {
-      loginBtn.hidden = true;
-    }
+    // Use Authorization Code flow with PKCE
+    const responseType = 'code';
+    const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&code_challenge=${codeChallenge}&code_challenge_method=S256&show_dialog=true`;
     
-    if (switchAccountBtn) {
-      switchAccountBtn.hidden = true; // No need for account switching
-    }
+    console.log('=== SPOTIFY AUTH DEBUG (PKCE) ===');
+    console.log('Client ID:', clientId);
+    console.log('Redirect URI:', redirectUri);
+    console.log('Response Type:', responseType);
+    console.log('Code Challenge Method: S256');
+    console.log('Full URL:', url);
+    console.log('================================');
     
-    updateStatus('Ready! You can now search for songs and discover music.');
-    
-    // Load featured playlists instead of user playlists
-    setTimeout(() => loadFeaturedPlaylists(), 1000);
+    updateStatus('Redirecting to Spotify...');
+    window.location = url;
     
   } catch (error) {
-    console.error('Login failed:', error);
-    updateStatus('Failed to authenticate. Please try again.', true);
-    
-    // Make sure login button is visible if login fails
-    const loginBtn = document.getElementById('login-btn');
-    if (loginBtn) {
-      loginBtn.hidden = false;
-    }
+    console.error('Error preparing Spotify auth:', error);
+    updateStatus('Failed to prepare authentication. Please try again.', true);
   }
 }
 
@@ -451,886 +461,66 @@ function showLoading(show) {
   }
 }
 
-function setupPlayer() {
-  if (!accessToken) {
-    console.error('No access token available');
-    updateStatus('No access token available', true);
+// --- Patch setupPlayer ---
+const originalSetupPlayer = setupPlayer;
+setupPlayer = function() {
+  originalSetupPlayer.apply(this, arguments);
+  setTimeout(() => updateDeviceList(), 1200);
+};
+
+// --- Patch initialization ---
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('=== SPOTIFY MUSIC PLAYER INITIALIZATION ===');
+  
+  // Check if we're returning from Spotify auth
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');
+  const error = urlParams.get('error');
+  
+  if (error) {
+    console.error('Auth error:', error);
+    updateStatus(`Authentication failed: ${error}`, true);
     return;
   }
   
-  // Prevent multiple setup attempts
-  if (player || isConnecting) {
-    console.log('Player already exists or connecting, skipping setup');
-    return;
-  }
-  
-  isConnecting = true;
-  updateStatus('Connecting to Spotify...');
-  
-  // Check if SDK is already loaded
-  if (typeof Spotify === 'undefined') {
-    console.error('Spotify Web Playback SDK not loaded');
-    updateStatus('Spotify SDK not loaded. Please refresh the page.', true);
-    isConnecting = false;
-    return;
-  }
-  
-  player = new Spotify.Player({
-    name: 'Web Player',
-    getOAuthToken: cb => { cb(accessToken); },
-    volume: 0.5
-  });
-  
-  player.addListener('ready', ({ device_id }) => {
-    console.log('Player ready with device ID:', device_id);
-    deviceId = device_id;
-    updateStatus('Connected! Ready to play music.');
+  if (code) {
+    console.log('Auth code received, exchanging for tokens...');
+    exchangeCodeForTokens(code);
+  } else {
+    // Check for existing tokens
+    const existingToken = sessionStorage.getItem('spotify_access_token');
+    const tokenExpiry = sessionStorage.getItem('spotify_token_expiry');
     
-    // Transfer playback to this device
-    makeSpotifyRequest('https://api.spotify.com/v1/me/player', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ 
-        device_ids: [deviceId], 
-        play: false 
-      })
-    }).then(response => {
-      if (!response.ok) {
-        console.error('Failed to transfer playback:', response.status);
-      }
-    }).catch(error => {
-      console.error('Error transferring playback:', error);
-    });
-  });
-  
-  player.addListener('not_ready', ({ device_id }) => {
-    console.log('Device ID has gone offline', device_id);
-    updateStatus('Player disconnected', true);
-    stopSeekBarTimer(); // Stop timer when player disconnects
-  });
-  
-  player.addListener('initialization_error', ({ message }) => {
-    console.error('Failed to initialize player:', message);
-    updateStatus('Failed to initialize player', true);
-    player = null; // Reset player on initialization error
-  });
-  
-  player.addListener('authentication_error', ({ message }) => {
-    console.error('Failed to authenticate:', message);
-    updateStatus('Authentication failed. Please login again.', true);
-    player = null; // Reset player on auth error
-    // Clear token and show login button
-    clearSpotifyToken();
-    accessToken = null;
-    document.getElementById('login-btn').hidden = false;
-  });
-  
-  player.addListener('account_error', ({ message }) => {
-    console.error('Failed to validate Spotify account:', message);
-    updateStatus('Account error. Please check your Spotify Premium status.', true);
-    player = null; // Reset player on account error
-  });
-  
-  player.addListener('playback_error', ({ message }) => {
-    console.error('Failed to perform playback:', message);
-    updateStatus('Playback error occurred', true);
-  });
-  
-  player.addListener('player_state_changed', state => {
-    console.log('Player state changed:', state);
-    updatePlayerUI(state);
-    
-    if (state) {
-      updateStatus('Now playing');
-      currentTrackId = state.track_window.current_track.id;
-    } else {
-      // No state means track ended - play next similar song
-      stopSeekBarTimer();
-      updateStatus('Track ended, playing next similar song...');
-      
-      // Auto-play next similar song if available
-      setTimeout(() => {
-        playNextSimilarSong();
-      }, 1000);
-    }
-  });
-  
-  player.connect().then(success => {
-    if (success) {
-      console.log('Successfully connected to Spotify!');
-      updateStatus('Welcome back! You can now search for songs and discover similar music.');
+    if (existingToken && tokenExpiry && Date.now() < parseInt(tokenExpiry)) {
+      console.log('Using existing valid token');
+      accessToken = existingToken;
       setupPlayer();
-      // Load user's playlists
-      setTimeout(() => fetchUserPlaylists(), 1000);
-      // Display current user info
-      setTimeout(() => displayCurrentUser(), 1500);
+      fetchUserPlaylists();
+      setTimeout(() => updateDeviceList(), 1200);
     } else {
-      updateStatus('Failed to connect to Spotify', true);
-      player = null; // Reset player on connection failure
-    }
-  }).catch(error => {
-    console.error('Connection error:', error);
-    updateStatus('Connection failed. Please try again.', true);
-    player = null; // Reset player on connection error
-  }).finally(() => {
-    isConnecting = false;
-  });
-}
-
-function loadPlaylist(playlistId) {
-  if (!deviceId || !accessToken) {
-    console.error('Device ID or access token not available');
-    updateStatus('Player not ready. Please wait...', true);
-    return;
-  }
-  
-  console.log('Loading playlist:', playlistId);
-  showLoading(true);
-  updateStatus('Loading playlist...');
-  
-  // First, transfer playback to our device
-  makeSpotifyRequest('https://api.spotify.com/v1/me/player', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ 
-      device_ids: [deviceId], 
-      play: false 
-    })
-  }).then(() => {
-    // Then start playing the playlist
-    return makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ 
-        context_uri: `spotify:playlist:${playlistId}` 
-      })
-    });
-  }).then(response => {
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    console.log('Playlist loaded successfully');
-    updateStatus('Playlist loaded successfully!');
-    document.getElementById('player-title').textContent = 'Loading playlist...';
-  }).catch(error => {
-    console.error('Error loading playlist:', error);
-    if (error.message === 'Authentication expired') {
-      updateStatus('Session expired. Please login again.', true);
-    } else {
-      updateStatus('Failed to load playlist. Please check the URL.', true);
-    }
-  }).finally(() => {
-    showLoading(false);
-  });
-}
-
-// Song Search Functions
-async function searchSongs(query) {
-  if (!accessToken) {
-    updateStatus('Please login to Spotify first', true);
-    return;
-  }
-
-  try {
-    showSearchLoading(true);
-    updateStatus('Searching for songs...');
-    
-    // Clear previous results
-    document.getElementById('search-results').innerHTML = '';
-    document.getElementById('similar-songs').innerHTML = '';
-
-    const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=15`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      displaySearchResults(data.tracks.items);
-      showSearchResults(true); // Show search results with similar songs
-      updateStatus(`Found ${data.tracks.items.length} songs`);
-    } else if (response.status === 403) {
-      // For free accounts, search might be restricted
-      console.log('Search access restricted (free account limitation)');
-      updateStatus('Search not available with free account', true);
-    } else {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-  } catch (error) {
-    console.error('Error searching songs:', error);
-    if (error.message === 'Authentication expired') {
-      updateStatus('Session expired. Please login again.', true);
-    } else {
-      updateStatus('Failed to search songs. Please try again.', true);
-    }
-  } finally {
-    showSearchLoading(false);
-  }
-}
-
-async function getSimilarSongs(trackId) {
-  if (!accessToken) {
-    updateStatus('Please login to Spotify first', true);
-    return;
-  }
-
-  try {
-    updateStatus('Finding similar songs...');
-
-    // Get track audio features first
-    const featuresResponse = await fetch(`https://api.spotify.com/v1/audio-features/${trackId}`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-
-    if (!featuresResponse.ok) {
-      if (featuresResponse.status === 403) {
-        console.log('Audio features access restricted (free account limitation)');
-        updateStatus('Similar songs not available with free account', true);
-        return;
-      }
-      throw new Error(`HTTP ${featuresResponse.status}: ${featuresResponse.statusText}`);
-    }
-
-    const features = await featuresResponse.json();
-
-    // Get recommendations based on the track
-    const recommendationsResponse = await fetch(
-      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      }
-    );
-
-    if (recommendationsResponse.ok) {
-      const recommendations = await recommendationsResponse.json();
-      displaySimilarSongs(recommendations.tracks);
-      showSearchResults(true); // Show search results with similar songs
-      updateStatus(`Found ${recommendations.tracks.length} similar songs`);
-    } else if (recommendationsResponse.status === 403) {
-      console.log('Recommendations access restricted (free account limitation)');
-      updateStatus('Similar songs not available with free account', true);
-    } else {
-      throw new Error(`HTTP ${recommendationsResponse.status}: ${recommendationsResponse.statusText}`);
-    }
-
-  } catch (error) {
-    console.error('Error getting similar songs:', error);
-    if (error.message === 'Authentication expired') {
-      updateStatus('Session expired. Please login again.', true);
-    } else {
-      updateStatus('Failed to get similar songs. Please try again.', true);
-    }
-  }
-}
-
-async function playSong(trackUri) {
-  // For client credentials flow, we can't control playback directly
-  // Instead, we'll open the track in Spotify
-  try {
-    updateStatus('Opening track in Spotify...');
-    
-    // Extract track ID from URI
-    const trackId = trackUri.split(':').pop();
-    currentTrackId = trackId;
-    
-    // Open the track in Spotify
-    const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
-    window.open(spotifyUrl, '_blank');
-    
-    updateStatus('Track opened in Spotify! Enjoy listening.');
-    
-    // Hide search results and return to player view
-    setTimeout(() => {
-      showSearchResults(false);
-      updateStatus('Track opened in Spotify. Use search to find more music!');
-    }, 1000);
-
-  } catch (error) {
-    console.error('Error handling song:', error);
-    updateStatus('Failed to open track. Please try again.', true);
-  }
-}
-
-function displaySearchResults(tracks) {
-  const resultsContainer = document.getElementById('search-results');
-  
-  if (!tracks || tracks.length === 0) {
-    resultsContainer.innerHTML = '<div class="no-results">No songs found. Try a different search term.</div>';
-    resultsContainer.style.display = 'block';
-    return;
-  }
-
-  const resultsHTML = tracks.map(track => `
-    <div class="search-result-item">
-      <img src="${track.album.images[0]?.url || 'https://via.placeholder.com/50x50?text=No+Image'}" alt="${track.name}">
-      <div class="search-result-info">
-        <div class="search-result-title">${track.name}</div>
-        <div class="search-result-artist">${track.artists.map(artist => artist.name).join(', ')}</div>
-      </div>
-      <button class="search-result-play" onclick="playSong('${track.uri}')" title="Play">▶️</button>
-      <button class="search-result-similar" onclick="getSimilarSongs('${track.id}')" title="Find Similar">🎵</button>
-    </div>
-  `).join('');
-
-  resultsContainer.innerHTML = resultsHTML;
-  resultsContainer.style.display = 'block';
-  resultsContainer.style.overflowY = 'auto';
-  
-  console.log(`Displayed ${tracks.length} search results`);
-}
-
-function displaySimilarSongs(tracks) {
-  const similarContainer = document.getElementById('similar-songs');
-  
-  if (!tracks || tracks.length === 0) {
-    similarContainer.innerHTML = '<div class="no-results">No similar songs found.</div>';
-    similarContainer.style.display = 'block';
-    return;
-  }
-
-  const similarHTML = `
-    <h4>🎵 Similar Songs You Might Like</h4>
-    ${tracks.map(track => `
-      <div class="similar-song-item">
-        <img src="${track.album.images[0]?.url || 'https://via.placeholder.com/40x40?text=No+Image'}" alt="${track.name}">
-        <div class="similar-song-info">
-          <div class="similar-song-title">${track.name}</div>
-          <div class="similar-song-artist">${track.artists.map(artist => artist.name).join(', ')}</div>
-        </div>
-        <button class="similar-song-play" onclick="playSong('${track.uri}')" title="Play">▶️</button>
-      </div>
-    `).join('')}
-  `;
-
-  similarContainer.innerHTML = similarHTML;
-  similarContainer.style.display = 'block';
-  similarContainer.style.overflowY = 'auto';
-  
-  console.log(`Displayed ${tracks.length} similar songs`);
-}
-
-function showSearchLoading(show) {
-  const button = document.getElementById('song-search-btn');
-  const indicator = document.getElementById('search-loading-indicator');
-  
-  if (show) {
-    button.disabled = true;
-    button.textContent = '';
-    indicator.style.display = 'block';
-  } else {
-    button.disabled = false;
-    button.textContent = 'Search';
-    indicator.style.display = 'none';
-  }
-}
-
-function showSearchResults(show) {
-  const searchResults = document.getElementById('search-results');
-  const similarSongs = document.getElementById('similar-songs');
-  const returnBtn = document.getElementById('return-to-player-btn');
-  
-  if (show) {
-    searchResults.style.display = 'block';
-    similarSongs.style.display = 'block';
-    returnBtn.style.display = 'block';
-    
-    // Ensure containers are scrollable
-    searchResults.style.overflowY = 'auto';
-    similarSongs.style.overflowY = 'auto';
-  } else {
-    searchResults.style.display = 'none';
-    similarSongs.style.display = 'none';
-    returnBtn.style.display = 'none';
-    // Clear the results
-    searchResults.innerHTML = '';
-    similarSongs.innerHTML = '';
-  }
-}
-
-function updateSeekBarProgress(currentTime, duration) {
-  const progressBar = document.getElementById('seek-bar-progress');
-  if (duration > 0) {
-    const progress = (currentTime / duration) * 100;
-    progressBar.style.width = `${progress}%`;
-  }
-}
-
-function testSpotifyAuth() {
-  // Test function to check if the auth URL is valid
-  const responseType = 'code';
-  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&code_challenge=${codeChallenge}&code_challenge_method=S256&show_dialog=true`;
-  
-  console.log('=== AUTH URL TEST (PKCE) ===');
-  console.log('URL:', url);
-  console.log('URL Length:', url.length);
-  console.log('Client ID Valid:', /^[a-f0-9]{32}$/.test(clientId));
-  console.log('Redirect URI Valid:', redirectUri.startsWith('https://'));
-  console.log('Code Challenge:', codeChallenge);
-  console.log('===========================');
-  
-  // Open URL in new tab for testing
-  window.open(url, '_blank');
-}
-
-// --- Auto-play similar songs logic ---
-async function getSimilarSongsForQueue(trackId) {
-  if (!trackId || !accessToken) return [];
-  
-  try {
-    // Get track audio features first
-    const featuresResponse = await makeSpotifyRequest(`https://api.spotify.com/v1/audio-features/${trackId}`);
-    if (!featuresResponse.ok) return [];
-    
-    const features = await featuresResponse.json();
-    
-    // Get recommendations based on the track
-    const recommendationsResponse = await makeSpotifyRequest(
-      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`
-    );
-    
-    if (!recommendationsResponse.ok) return [];
-    
-    const recommendations = await recommendationsResponse.json();
-    return recommendations.tracks;
-    
-  } catch (error) {
-    console.error('Error getting similar songs for queue:', error);
-    return [];
-  }
-}
-
-async function playNextSimilarSong() {
-  if (similarSongsQueue.length === 0 || isAutoPlayingSimilar) return;
-  
-  isAutoPlayingSimilar = true;
-  const nextSong = similarSongsQueue.shift(); // Get and remove the first song
-  
-  try {
-    updateStatus(`Playing next: ${nextSong.name} - ${nextSong.artists.map(a => a.name).join(', ')}`);
-    
-    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        uris: [nextSong.uri]
-      })
-    });
-    
-    if (response.ok) {
-      currentTrackId = nextSong.id;
-      updateStatus(`Now playing: ${nextSong.name} - ${nextSong.artists.map(a => a.name).join(', ')} (${similarSongsQueue.length} more in queue)`);
-      
-      // Get more similar songs for the queue when this song starts
-      setTimeout(async () => {
-        const moreSimilarSongs = await getSimilarSongsForQueue(nextSong.id);
-        similarSongsQueue.push(...moreSimilarSongs);
-        console.log(`Added ${moreSimilarSongs.length} more similar songs to queue. Total: ${similarSongsQueue.length}`);
-      }, 2000);
-    }
-    
-  } catch (error) {
-    console.error('Error playing next similar song:', error);
-    updateStatus('Failed to play next song', true);
-  } finally {
-    isAutoPlayingSimilar = false;
-  }
-}
-
-function clearSimilarSongsQueue() {
-  similarSongsQueue = [];
-  currentTrackId = null;
-  isAutoPlayingSimilar = false;
-  console.log('Similar songs queue cleared');
-}
-
-function getQueueStatus() {
-  return {
-    currentTrack: currentTrackId,
-    queueLength: similarSongsQueue.length,
-    isAutoPlaying: isAutoPlayingSimilar
-  };
-}
-
-// --- Playlist Management Functions ---
-// Note: fetchUserPlaylists() and displayUserPlaylists() have been replaced with
-// loadFeaturedPlaylists() and displayFeaturedPlaylists() for client credentials flow
-
-async function playPlaylist(playlistUri) {
-  // For client credentials flow, we can't control playback directly
-  // Instead, we'll open the content in Spotify
-  try {
-    updateStatus('Opening in Spotify...');
-    
-    let spotifyUrl = '';
-    
-    if (playlistUri.startsWith('spotify:playlist:')) {
-      // Regular playlist
-      const playlistId = playlistUri.split(':').pop();
-      spotifyUrl = `https://open.spotify.com/playlist/${playlistId}`;
-    } else if (playlistUri.startsWith('spotify:album:')) {
-      // Album
-      const albumId = playlistUri.split(':').pop();
-      spotifyUrl = `https://open.spotify.com/album/${albumId}`;
-    } else if (playlistUri.startsWith('spotify:category:')) {
-      // Category
-      const categoryId = playlistUri.split(':').pop();
-      spotifyUrl = `https://open.spotify.com/genre/${categoryId}`;
-    } else if (playlistUri === 'search') {
-      // Search placeholder
-      updateStatus('Use the search box above to find music!');
-      return;
-    } else {
-      // Default to playlist format
-      const id = playlistUri.split(':').pop();
-      spotifyUrl = `https://open.spotify.com/playlist/${id}`;
-    }
-    
-    // Open in Spotify
-    window.open(spotifyUrl, '_blank');
-    updateStatus('Opened in Spotify! Enjoy listening.');
-    
-  } catch (error) {
-    console.error('Error handling playlist:', error);
-    updateStatus('Failed to open content. Please try again.', true);
-  }
-}
-
-// Debug function to help troubleshoot authentication issues
-async function debugSpotifyAuth() {
-  console.log('=== SPOTIFY AUTH DEBUG ===');
-  console.log('Client ID:', clientId);
-  console.log('Redirect URI:', redirectUri);
-  console.log('Access Token exists:', !!accessToken);
-  console.log('Access Token length:', accessToken ? accessToken.length : 0);
-  
-  if (accessToken) {
-    try {
-      console.log('Testing token with search endpoint...');
-      const response = await fetch('https://api.spotify.com/v1/search?q=test&type=track&limit=1', {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      });
-      
-      console.log('Response status:', response.status);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Search test successful:', data);
-      } else {
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-      }
-    } catch (error) {
-      console.error('Error testing token:', error);
+      console.log('No valid token found, showing login');
+      showLoginInterface();
     }
   }
   
-  console.log('=== END DEBUG ===');
-}
+  // Setup event listeners
+  setupEventListeners();
+});
 
-// Add debug function to window for console access
-window.debugSpotifyAuth = debugSpotifyAuth;
-
-// Function to completely clear all authentication data
-function clearAllAuthData() {
-  console.log('Clearing all authentication data...');
-  
-  // Clear tokens
-  clearSpotifyToken();
-  sessionStorage.removeItem('spotify_code_verifier');
-  
-  // Clear variables
-  accessToken = null;
-  currentTrackId = null;
-  codeVerifier = '';
-  codeChallenge = '';
-  
-  // Disconnect player
-  if (player && player.disconnect) {
-    player.disconnect();
-  }
-  player = null;
-  deviceId = null;
-  
-  // Clear similar songs queue
-  clearSimilarSongsQueue();
-  
-  // Reset UI - check if elements exist first
+function showLoginInterface() {
   const loginBtn = document.getElementById('login-btn');
   const switchAccountBtn = document.getElementById('switch-account-btn');
-  const playlistsContainer = document.getElementById('playlists-container');
   
   if (loginBtn) {
     loginBtn.hidden = false;
   }
   
   if (switchAccountBtn) {
-    switchAccountBtn.hidden = true;
+    switchAccountBtn.hidden = false;
   }
   
-  if (playlistsContainer) {
-    playlistsContainer.innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
-  }
-  
-  showSearchResults(false);
-  animateGlossyEqBars(false);
-  
-  // Clear URL parameters
-  window.history.replaceState({}, document.title, window.location.pathname);
-  
-  updateStatus('All authentication data cleared. Please login again.');
-  
-  console.log('All authentication data cleared');
+  updateStatus('Login to Spotify to start playing music!');
 }
-
-// Add to window for console access
-window.clearAllAuthData = clearAllAuthData;
-
-// Initialize everything when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
-  console.log('Initializing Spotify app with client credentials...');
-  
-  // Small delay to ensure all DOM elements are fully loaded
-  setTimeout(async () => {
-    // Check for saved token first
-    const savedToken = getSavedSpotifyToken();
-    if (savedToken) {
-      // Check if the saved token is still valid
-      const isValid = await checkTokenValidity(savedToken);
-      if (isValid) {
-        accessToken = savedToken;
-        
-        // Check if elements exist before modifying them
-        const loginBtn = document.getElementById('login-btn');
-        const switchAccountBtn = document.getElementById('switch-account-btn');
-        
-        if (loginBtn) {
-          loginBtn.hidden = true;
-        }
-        
-        if (switchAccountBtn) {
-          switchAccountBtn.hidden = true; // No account switching needed
-        }
-        
-        updateStatus('Welcome back! You can search for songs and discover music.');
-        // Load featured playlists
-        setTimeout(() => loadFeaturedPlaylists(), 1000);
-      } else {
-        // Token is expired, clear it and show login button
-        clearSpotifyToken();
-        updateStatus('Session expired. Please login again.');
-        
-        const loginBtn = document.getElementById('login-btn');
-        if (loginBtn) {
-          loginBtn.hidden = false;
-          loginBtn.onclick = loginWithSpotify;
-        }
-      }
-    } else {
-      // No token, show login button
-      updateStatus('Click "Login with Spotify" to start discovering music!');
-      
-      const loginBtn = document.getElementById('login-btn');
-      if (loginBtn) {
-        loginBtn.onclick = loginWithSpotify;
-      }
-    }
-  }, 100); // Small delay to ensure DOM is ready
-  
-  // Player control event listeners
-  document.getElementById('play-btn').onclick = () => {
-    if (!player) {
-      alert('Please login to Spotify first');
-      return;
-    }
-    player.togglePlay();
-  };
-  
-  document.getElementById('prev-btn').onclick = () => {
-    if (!player) {
-      alert('Please login to Spotify first');
-      return;
-    }
-    player.previousTrack();
-  };
-  
-  document.getElementById('next-btn').onclick = () => {
-    if (!player) {
-      alert('Please login to Spotify first');
-      return;
-    }
-    player.nextTrack();
-  };
-  
-  document.getElementById('seek-bar').oninput = (e) => {
-    if (!player) return;
-    
-    // Pause the timer while user is dragging
-    stopSeekBarTimer();
-    
-    const newPosition = Number(e.target.value);
-    player.seek(newPosition);
-    
-    // Update the current time display immediately
-    document.getElementById('current-time').textContent = msToTime(newPosition);
-  };
-  
-  // Resume timer when user finishes dragging
-  document.getElementById('seek-bar').onchange = () => {
-    if (player) {
-      // Small delay to ensure seek operation completes
-      setTimeout(() => {
-        player.getCurrentState().then(state => {
-          if (state && !state.paused) {
-            startSeekBarTimer();
-          }
-        });
-      }, 100);
-    }
-  };
-  
-  // Song search functionality
-  document.getElementById('song-search-btn').onclick = () => {
-    const query = document.getElementById('song-search-input').value.trim();
-    if (!query) {
-      alert('Please enter a search term');
-      return;
-    }
-    
-    if (!accessToken) {
-      alert('Please login to Spotify first');
-      return;
-    }
-    
-    searchSongs(query);
-  };
-  
-  // Allow Enter key to submit song search
-  document.getElementById('song-search-input').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      document.getElementById('song-search-btn').click();
-    }
-  });
-  
-  // Return to player button
-  document.getElementById('return-to-player-btn').onclick = () => {
-    showSearchResults(false);
-    updateStatus('Welcome back! You can now search for songs and discover similar music.');
-  };
-  
-  // Switch account button
-  document.getElementById('switch-account-btn').onclick = () => {
-    switchSpotifyAccount();
-  };
-  
-  // Refresh playlists button
-  document.getElementById('refresh-playlists-btn').onclick = () => {
-    loadFeaturedPlaylists();
-  };
-  
-  // Initialize histogram bars
-  createGlossyEqBars();
-  
-  // Test auth button
-  document.getElementById('test-auth-btn').onclick = async () => {
-    console.log('=== MANUAL AUTH TEST ===');
-    await debugSpotifyAuth();
-    
-    if (!accessToken) {
-      updateStatus('No access token found. Please login first.', true);
-      return;
-    }
-    
-    try {
-      updateStatus('Testing authentication...');
-      const user = await getCurrentUserProfile();
-      if (user) {
-        updateStatus(`Authentication successful! Logged in as: ${user.display_name}`);
-      } else {
-        updateStatus('Authentication failed. Please try logging in again.', true);
-      }
-    } catch (error) {
-      console.error('Auth test failed:', error);
-      updateStatus('Authentication test failed. Please try logging in again.', true);
-    }
-  };
-  
-  // Clear auth button
-  document.getElementById('clear-auth-btn').onclick = () => {
-    clearAllAuthData();
-  };
-  
-  // Cleanup timer when page is unloaded
-  window.addEventListener('beforeunload', () => {
-    stopSeekBarTimer();
-  });
-  
-  // Add logout button functionality
-  if (!document.getElementById('logout-btn')) {
-    const logoutBtn = document.createElement('button');
-    logoutBtn.id = 'logout-btn';
-    logoutBtn.textContent = 'Logout from Spotify';
-    logoutBtn.style.marginTop = '10px';
-    logoutBtn.style.background = '#888';
-    logoutBtn.style.color = '#fff';
-    logoutBtn.style.border = 'none';
-    logoutBtn.style.borderRadius = '20px';
-    logoutBtn.style.padding = '10px 20px';
-    logoutBtn.style.cursor = 'pointer';
-    logoutBtn.style.fontSize = '14px';
-    
-    const playerInfo = document.querySelector('.player-info');
-    if (playerInfo) {
-      playerInfo.appendChild(logoutBtn);
-    }
-    
-    logoutBtn.onclick = () => {
-      clearSpotifyToken();
-      clearSimilarSongsQueue();
-      accessToken = null;
-      currentTrackId = null;
-      updateStatus('Logged out. Please login to Spotify to search for songs and discover music');
-      
-      const loginBtn = document.getElementById('login-btn');
-      const switchAccountBtn = document.getElementById('switch-account-btn');
-      const playlistsContainer = document.getElementById('playlists-container');
-      
-      if (loginBtn) {
-        loginBtn.hidden = false;
-      }
-      
-      if (switchAccountBtn) {
-        switchAccountBtn.hidden = true;
-      }
-      
-      if (player && player.disconnect) player.disconnect();
-      player = null;
-      
-      // Reset UI
-      if (playlistsContainer) {
-        playlistsContainer.innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
-      }
-      showSearchResults(false);
-      animateGlossyEqBars(false);
-    };
-  }
-});
 
 // Load featured playlists that any user can access
 async function loadFeaturedPlaylists() {
@@ -1457,4 +647,746 @@ function displayFeaturedPlaylists(playlists) {
   `).join('');
 
   container.innerHTML = playlistsHTML;
-} 
+}
+
+// --- Device Selection ---
+async function fetchAvailableDevices() {
+  if (!accessToken) return [];
+  try {
+    const response = await makeSpotifyRequest('https://api.spotify.com/v1/me/player/devices');
+    if (!response.ok) throw new Error('Failed to fetch devices');
+    const data = await response.json();
+    return data.devices || [];
+  } catch (e) {
+    console.error('Error fetching devices:', e);
+    return [];
+  }
+}
+
+function showDeviceSelector(devices) {
+  let container = document.getElementById('device-selector-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'device-selector-container';
+    container.style.margin = '10px 0';
+    const playerInfo = document.querySelector('.player-info');
+    if (playerInfo) playerInfo.insertBefore(container, playerInfo.firstChild);
+  }
+  if (!devices.length) {
+    container.innerHTML = '<div style="color: #b00; font-size: 13px;">No active Spotify device found.<br>Open the Spotify app on your PC/phone and start playing any song once, then click <b>Refresh Devices</b>.</div>' +
+      '<button id="refresh-devices-btn" style="margin-top:6px;">Refresh Devices</button>';
+    document.getElementById('refresh-devices-btn').onclick = updateDeviceList;
+    return;
+  }
+  let html = '<label for="device-select">Playback Device:</label> <select id="device-select">';
+  devices.forEach(d => {
+    html += `<option value="${d.id}"${d.is_active ? ' selected' : ''}>${d.name} (${d.type}${d.is_active ? ', Active' : ''})</option>`;
+  });
+  html += '</select>';
+  html += ' <button id="refresh-devices-btn">Refresh Devices</button>';
+  container.innerHTML = html;
+  document.getElementById('device-select').onchange = function() {
+    deviceId = this.value;
+    updateStatus('Selected device: ' + this.options[this.selectedIndex].text);
+  };
+  document.getElementById('refresh-devices-btn').onclick = updateDeviceList;
+}
+
+async function updateDeviceList() {
+  const devices = await fetchAvailableDevices();
+  if (devices.length) {
+    // Default to first device if none selected
+    if (!deviceId || !devices.some(d => d.id === deviceId)) {
+      deviceId = devices[0].id;
+    }
+  }
+  showDeviceSelector(devices);
+}
+
+// Call updateDeviceList after login and after player setup
+// In initialization, after setupPlayer():
+// setTimeout(() => updateDeviceList(), 1200);
+// Also call updateDeviceList when user clicks refresh devices
+
+// Call updateDeviceList after login and after player setup
+// In initialization, after setupPlayer():
+// setTimeout(() => updateDeviceList(), 1200);
+// Also call updateDeviceList when user clicks refresh devices
+
+// Call updateDeviceList after login and after player setup
+// In initialization, after setupPlayer():
+// setTimeout(() => updateDeviceList(), 1200);
+// Also call updateDeviceList when user clicks refresh devices
+
+// In exchangeCodeForTokens, after setupPlayer(), call updateDeviceList
+const originalExchangeCodeForTokens = exchangeCodeForTokens;
+exchangeCodeForTokens = async function(code) {
+  await originalExchangeCodeForTokens.apply(this, arguments);
+  setTimeout(() => updateDeviceList(), 1200);
+};
+
+// --- Playlist Management Functions ---
+async function fetchUserPlaylists() {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    updateStatus('Loading your playlists...');
+    
+    // Fetch user's playlists (limit to 20 for performance)
+    const response = await fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      displayUserPlaylists(data.items);
+      updateStatus(`Loaded ${data.items.length} playlists`);
+    } else if (response.status === 403) {
+      // For free accounts, playlist access might be restricted
+      console.log('Playlist access restricted (free account limitation)');
+      displayUserPlaylists([]);
+      updateStatus('Playlist access not available with free account');
+    } else {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+  } catch (error) {
+    console.error('Error fetching playlists:', error);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to load playlists. Please try again.', true);
+    }
+  }
+}
+
+function displayUserPlaylists(playlists) {
+  const container = document.getElementById('playlists-container');
+  
+  if (!playlists || playlists.length === 0) {
+    container.innerHTML = '<div class="no-playlists">No playlists found. Create some playlists in Spotify!</div>';
+    return;
+  }
+
+  const playlistsHTML = playlists.map(playlist => `
+    <div class="playlist-item">
+      <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/45x45?text=🎵'}" alt="${playlist.name}">
+      <div class="playlist-info">
+        <div class="playlist-name">${playlist.name}</div>
+        <div class="playlist-owner">by ${playlist.owner.display_name}</div>
+      </div>
+      <button class="playlist-play" onclick="playPlaylist('${playlist.uri}')" title="Play Playlist">▶️</button>
+    </div>
+  `).join('');
+
+  container.innerHTML = playlistsHTML;
+}
+
+// Debug function to help troubleshoot authentication issues
+async function debugSpotifyAuth() {
+  console.log('=== SPOTIFY AUTH DEBUG ===');
+  console.log('Client ID:', clientId);
+  console.log('Redirect URI:', redirectUri);
+  console.log('Access Token exists:', !!accessToken);
+  console.log('Access Token length:', accessToken ? accessToken.length : 0);
+  
+  if (accessToken) {
+    try {
+      console.log('Testing token with search endpoint...');
+      const response = await fetch('https://api.spotify.com/v1/search?q=test&type=track&limit=1', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Search test successful:', data);
+      } else {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+      }
+    } catch (error) {
+      console.error('Error testing token:', error);
+    }
+  }
+  
+  console.log('=== END DEBUG ===');
+}
+
+// Add debug function to window for console access
+window.debugSpotifyAuth = debugSpotifyAuth;
+
+// Function to completely clear all authentication data
+function clearAllAuthData() {
+  console.log('Clearing all authentication data...');
+  
+  // Clear tokens
+  clearSpotifyToken();
+  sessionStorage.removeItem('spotify_code_verifier');
+  
+  // Clear variables
+  accessToken = null;
+  currentTrackId = null;
+  codeVerifier = '';
+  codeChallenge = '';
+  
+  // Disconnect player
+  if (player && player.disconnect) {
+    player.disconnect();
+  }
+  player = null;
+  deviceId = null;
+  
+  // Clear similar songs queue
+  clearSimilarSongsQueue();
+  
+  // Reset UI - check if elements exist first
+  const loginBtn = document.getElementById('login-btn');
+  const switchAccountBtn = document.getElementById('switch-account-btn');
+  const playlistsContainer = document.getElementById('playlists-container');
+  
+  if (loginBtn) {
+    loginBtn.hidden = false;
+  }
+  
+  if (switchAccountBtn) {
+    switchAccountBtn.hidden = true;
+  }
+  
+  if (playlistsContainer) {
+    playlistsContainer.innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
+  }
+  
+  showSearchResults(false);
+  animateGlossyEqBars(false);
+  
+  // Clear URL parameters
+  window.history.replaceState({}, document.title, window.location.pathname);
+  
+  updateStatus('All authentication data cleared. Please login again.');
+  
+  console.log('All authentication data cleared');
+}
+
+// Add to window for console access
+window.clearAllAuthData = clearAllAuthData;
+
+function updateSeekBarProgress(currentTime, duration) {
+  const progressBar = document.getElementById('seek-bar-progress');
+  if (duration > 0) {
+    const progress = (currentTime / duration) * 100;
+    progressBar.style.width = `${progress}%`;
+  }
+}
+
+function testSpotifyAuth() {
+  // Test function to check if the auth URL is valid
+  const responseType = 'code';
+  const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes.join('%20')}&response_type=${responseType}&code_challenge=${codeChallenge}&code_challenge_method=S256&show_dialog=true`;
+  
+  console.log('=== AUTH URL TEST (PKCE) ===');
+  console.log('URL:', url);
+  console.log('URL Length:', url.length);
+  console.log('Client ID Valid:', /^[a-f0-9]{32}$/.test(clientId));
+  console.log('Redirect URI Valid:', redirectUri.startsWith('https://'));
+  console.log('Code Challenge:', codeChallenge);
+  console.log('===========================');
+  
+  // Open URL in new tab for testing
+  window.open(url, '_blank');
+}
+
+// --- Auto-play similar songs logic ---
+async function getSimilarSongsForQueue(trackId) {
+  if (!trackId || !accessToken) return [];
+  
+  try {
+    // Get track audio features first
+    const featuresResponse = await makeSpotifyRequest(`https://api.spotify.com/v1/audio-features/${trackId}`);
+    if (!featuresResponse.ok) return [];
+    
+    const features = await featuresResponse.json();
+    
+    // Get recommendations based on the track
+    const recommendationsResponse = await makeSpotifyRequest(
+      `https://api.spotify.com/v1/recommendations?seed_tracks=${trackId}&limit=10&target_danceability=${features.danceability}&target_energy=${features.energy}&target_valence=${features.valence}`
+    );
+    
+    if (!recommendationsResponse.ok) return [];
+    
+    const recommendations = await recommendationsResponse.json();
+    return recommendations.tracks;
+    
+  } catch (error) {
+    console.error('Error getting similar songs for queue:', error);
+    return [];
+  }
+}
+
+async function playNextSimilarSong() {
+  if (similarSongsQueue.length === 0 || isAutoPlayingSimilar) return;
+  
+  isAutoPlayingSimilar = true;
+  const nextSong = similarSongsQueue.shift(); // Get and remove the first song
+  
+  try {
+    updateStatus(`Playing next: ${nextSong.name} - ${nextSong.artists.map(a => a.name).join(', ')}`);
+    
+    const response = await makeSpotifyRequest(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        uris: [nextSong.uri]
+      })
+    });
+    
+    if (response.ok) {
+      currentTrackId = nextSong.id;
+      updateStatus(`Now playing: ${nextSong.name} - ${nextSong.artists.map(a => a.name).join(', ')} (${similarSongsQueue.length} more in queue)`);
+      
+      // Get more similar songs for the queue when this song starts
+      setTimeout(async () => {
+        const moreSimilarSongs = await getSimilarSongsForQueue(nextSong.id);
+        similarSongsQueue.push(...moreSimilarSongs);
+        console.log(`Added ${moreSimilarSongs.length} more similar songs to queue. Total: ${similarSongsQueue.length}`);
+      }, 2000);
+    }
+    
+  } catch (error) {
+    console.error('Error playing next similar song:', error);
+    updateStatus('Failed to play next song', true);
+  } finally {
+    isAutoPlayingSimilar = false;
+  }
+}
+
+function clearSimilarSongsQueue() {
+  similarSongsQueue = [];
+  currentTrackId = null;
+  isAutoPlayingSimilar = false;
+  console.log('Similar songs queue cleared');
+}
+
+function getQueueStatus() {
+  return {
+    currentTrack: currentTrackId,
+    queueLength: similarSongsQueue.length,
+    isAutoPlaying: isAutoPlayingSimilar
+  };
+}
+
+// --- Playlist Management Functions ---
+async function fetchUserPlaylists() {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    updateStatus('Loading your playlists...');
+    
+    // Fetch user's playlists (limit to 20 for performance)
+    const response = await fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      displayUserPlaylists(data.items);
+      updateStatus(`Loaded ${data.items.length} playlists`);
+    } else if (response.status === 403) {
+      // For free accounts, playlist access might be restricted
+      console.log('Playlist access restricted (free account limitation)');
+      displayUserPlaylists([]);
+      updateStatus('Playlist access not available with free account');
+    } else {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+  } catch (error) {
+    console.error('Error fetching playlists:', error);
+    if (error.message === 'Authentication expired') {
+      updateStatus('Session expired. Please login again.', true);
+    } else {
+      updateStatus('Failed to load playlists. Please try again.', true);
+    }
+  }
+}
+
+function displayUserPlaylists(playlists) {
+  const container = document.getElementById('playlists-container');
+  
+  if (!playlists || playlists.length === 0) {
+    container.innerHTML = '<div class="no-playlists">No playlists found. Create some playlists in Spotify!</div>';
+    return;
+  }
+
+  const playlistsHTML = playlists.map(playlist => `
+    <div class="playlist-item">
+      <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/45x45?text=🎵'}" alt="${playlist.name}">
+      <div class="playlist-info">
+        <div class="playlist-name">${playlist.name}</div>
+        <div class="playlist-owner">by ${playlist.owner.display_name}</div>
+      </div>
+      <button class="playlist-play" onclick="playPlaylist('${playlist.uri}')" title="Play Playlist">▶️</button>
+    </div>
+  `).join('');
+
+  container.innerHTML = playlistsHTML;
+}
+
+// Debug function to help troubleshoot authentication issues
+async function debugSpotifyAuth() {
+  console.log('=== SPOTIFY AUTH DEBUG ===');
+  console.log('Client ID:', clientId);
+  console.log('Redirect URI:', redirectUri);
+  console.log('Access Token exists:', !!accessToken);
+  console.log('Access Token length:', accessToken ? accessToken.length : 0);
+  
+  if (accessToken) {
+    try {
+      console.log('Testing token with search endpoint...');
+      const response = await fetch('https://api.spotify.com/v1/search?q=test&type=track&limit=1', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Search test successful:', data);
+      } else {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+      }
+    } catch (error) {
+      console.error('Error testing token:', error);
+    }
+  }
+  
+  console.log('=== END DEBUG ===');
+}
+
+// Add debug function to window for console access
+window.debugSpotifyAuth = debugSpotifyAuth;
+
+// Function to completely clear all authentication data
+function clearAllAuthData() {
+  console.log('Clearing all authentication data...');
+  
+  // Clear tokens
+  clearSpotifyToken();
+  sessionStorage.removeItem('spotify_code_verifier');
+  
+  // Clear variables
+  accessToken = null;
+  currentTrackId = null;
+  codeVerifier = '';
+  codeChallenge = '';
+  
+  // Disconnect player
+  if (player && player.disconnect) {
+    player.disconnect();
+  }
+  player = null;
+  deviceId = null;
+  
+  // Clear similar songs queue
+  clearSimilarSongsQueue();
+  
+  // Reset UI - check if elements exist first
+  const loginBtn = document.getElementById('login-btn');
+  const switchAccountBtn = document.getElementById('switch-account-btn');
+  const playlistsContainer = document.getElementById('playlists-container');
+  
+  if (loginBtn) {
+    loginBtn.hidden = false;
+  }
+  
+  if (switchAccountBtn) {
+    switchAccountBtn.hidden = true;
+  }
+  
+  if (playlistsContainer) {
+    playlistsContainer.innerHTML = '<div class="loading-playlists">Loading featured playlists...</div>';
+  }
+  
+  showSearchResults(false);
+  animateGlossyEqBars(false);
+  
+  // Clear URL parameters
+  window.history.replaceState({}, document.title, window.location.pathname);
+  
+  updateStatus('All authentication data cleared. Please login again.');
+  
+  console.log('All authentication data cleared');
+}
+
+// Add to window for console access
+window.clearAllAuthData = clearAllAuthData;
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('=== SPOTIFY MUSIC PLAYER INITIALIZATION ===');
+  
+  // Check if we're returning from Spotify auth
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');
+  const error = urlParams.get('error');
+  
+  if (error) {
+    console.error('Auth error:', error);
+    updateStatus(`Authentication failed: ${error}`, true);
+    return;
+  }
+  
+  if (code) {
+    console.log('Auth code received, exchanging for tokens...');
+    exchangeCodeForTokens(code);
+  } else {
+    // Check for existing tokens
+    const existingToken = sessionStorage.getItem('spotify_access_token');
+    const tokenExpiry = sessionStorage.getItem('spotify_token_expiry');
+    
+    if (existingToken && tokenExpiry && Date.now() < parseInt(tokenExpiry)) {
+      console.log('Using existing valid token');
+      accessToken = existingToken;
+      setupPlayer();
+      fetchUserPlaylists();
+      setTimeout(() => updateDeviceList(), 1200);
+    } else {
+      console.log('No valid token found, showing login');
+      showLoginInterface();
+    }
+  }
+  
+  // Setup event listeners
+  setupEventListeners();
+});
+
+function showLoginInterface() {
+  const loginBtn = document.getElementById('login-btn');
+  const switchAccountBtn = document.getElementById('switch-account-btn');
+  
+  if (loginBtn) {
+    loginBtn.hidden = false;
+  }
+  
+  if (switchAccountBtn) {
+    switchAccountBtn.hidden = false;
+  }
+  
+  updateStatus('Login to Spotify to start playing music!');
+}
+
+// Load featured playlists that any user can access
+async function loadFeaturedPlaylists() {
+  if (!accessToken) {
+    updateStatus('Please login to Spotify first', true);
+    return;
+  }
+
+  try {
+    updateStatus('Loading featured playlists...');
+    
+    // Try multiple endpoints to get playlists
+    let playlists = [];
+    
+    // First try: Get new releases (which are always available)
+    try {
+      const newReleasesResponse = await fetch('https://api.spotify.com/v1/browse/new-releases?limit=10', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      if (newReleasesResponse.ok) {
+        const data = await newReleasesResponse.json();
+        // Convert albums to playlist-like format
+        playlists = data.albums.items.map(album => ({
+          name: `New Release: ${album.name}`,
+          owner: { display_name: album.artists[0]?.name || 'Various Artists' },
+          images: album.images,
+          uri: album.uri,
+          id: album.id
+        }));
+        console.log('Loaded new releases as playlists');
+      }
+    } catch (error) {
+      console.log('New releases endpoint failed, trying alternatives...');
+    }
+    
+    // If no new releases, try categories
+    if (playlists.length === 0) {
+      try {
+        const categoriesResponse = await fetch('https://api.spotify.com/v1/browse/categories?limit=10', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        });
+        
+        if (categoriesResponse.ok) {
+          const data = await categoriesResponse.json();
+          // Convert categories to playlist-like format
+          playlists = data.categories.items.map(category => ({
+            name: `Category: ${category.name}`,
+            owner: { display_name: 'Spotify' },
+            images: category.icons,
+            uri: `spotify:category:${category.id}`,
+            id: category.id
+          }));
+          console.log('Loaded categories as playlists');
+        }
+      } catch (error) {
+        console.log('Categories endpoint failed...');
+      }
+    }
+    
+    // If still no playlists, create some default ones
+    if (playlists.length === 0) {
+      playlists = [
+        {
+          name: 'Popular Songs',
+          owner: { display_name: 'Spotify' },
+          images: [{ url: 'https://via.placeholder.com/45x45?text=🎵' }],
+          uri: 'spotify:playlist:37i9dQZEVXbMDoHDwVN2tF', // Global Top 50
+          id: 'popular'
+        },
+        {
+          name: 'Trending Now',
+          owner: { display_name: 'Spotify' },
+          images: [{ url: 'https://via.placeholder.com/45x45?text=🔥' }],
+          uri: 'spotify:playlist:37i9dQZEVXbMDoHDwVN2tF',
+          id: 'trending'
+        }
+      ];
+      console.log('Using default playlists');
+    }
+    
+    displayFeaturedPlaylists(playlists);
+    updateStatus(`Loaded ${playlists.length} playlists`);
+
+  } catch (error) {
+    console.error('Error fetching playlists:', error);
+    updateStatus('Failed to load playlists. Please try again.', true);
+    
+    // Show some default playlists even if API fails
+    const defaultPlaylists = [
+      {
+        name: 'Search for Music',
+        owner: { display_name: 'Use the search above' },
+        images: [{ url: 'https://via.placeholder.com/45x45?text=🔍' }],
+        uri: 'search',
+        id: 'search'
+      }
+    ];
+    displayFeaturedPlaylists(defaultPlaylists);
+  }
+}
+
+function displayFeaturedPlaylists(playlists) {
+  const container = document.getElementById('playlists-container');
+  
+  if (!playlists || playlists.length === 0) {
+    container.innerHTML = '<div class="no-playlists">No featured playlists found.</div>';
+    return;
+  }
+
+  const playlistsHTML = playlists.map(playlist => `
+    <div class="playlist-item">
+      <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/45x45?text=🎵'}" alt="${playlist.name}">
+      <div class="playlist-info">
+        <div class="playlist-name">${playlist.name}</div>
+        <div class="playlist-owner">by ${playlist.owner.display_name}</div>
+      </div>
+      <button class="playlist-play" onclick="playPlaylist('${playlist.uri}')" title="Play Playlist">▶️</button>
+    </div>
+  `).join('');
+
+  container.innerHTML = playlistsHTML;
+}
+
+// --- Device Selection ---
+async function fetchAvailableDevices() {
+  if (!accessToken) return [];
+  try {
+    const response = await makeSpotifyRequest('https://api.spotify.com/v1/me/player/devices');
+    if (!response.ok) throw new Error('Failed to fetch devices');
+    const data = await response.json();
+    return data.devices || [];
+  } catch (e) {
+    console.error('Error fetching devices:', e);
+    return [];
+  }
+}
+
+function showDeviceSelector(devices) {
+  let container = document.getElementById('device-selector-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'device-selector-container';
+    container.style.margin = '10px 0';
+    const playerInfo = document.querySelector('.player-info');
+    if (playerInfo) playerInfo.insertBefore(container, playerInfo.firstChild);
+  }
+  if (!devices.length) {
+    container.innerHTML = '<div style="color: #b00; font-size: 13px;">No active Spotify device found.<br>Open the Spotify app on your PC/phone and start playing any song once, then click <b>Refresh Devices</b>.</div>' +
+      '<button id="refresh-devices-btn" style="margin-top:6px;">Refresh Devices</button>';
+    document.getElementById('refresh-devices-btn').onclick = updateDeviceList;
+    return;
+  }
+  let html = '<label for="device-select">Playback Device:</label> <select id="device-select">';
+  devices.forEach(d => {
+    html += `<option value="${d.id}"${d.is_active ? ' selected' : ''}>${d.name} (${d.type}${d.is_active ? ', Active' : ''})</option>`;
+  });
+  html += '</select>';
+  html += ' <button id="refresh-devices-btn">Refresh Devices</button>';
+  container.innerHTML = html;
+  document.getElementById('device-select').onchange = function() {
+    deviceId = this.value;
+    updateStatus('Selected device: ' + this.options[this.selectedIndex].text);
+  };
+  document.getElementById('refresh-devices-btn').onclick = updateDeviceList;
+}
+
+async function updateDeviceList() {
+  const devices = await fetchAvailableDevices();
+  if (devices.length) {
+    // Default to first device if none selected
+    if (!deviceId || !devices.some(d => d.id === deviceId)) {
+      deviceId = devices[0].id;
+    }
+  }
+  showDeviceSelector(devices);
+}
+
+// Call updateDeviceList after login and after player setup
+// In initialization, after setupPlayer():
+// setTimeout(() => updateDeviceList(), 1200);
+// Also call updateDeviceList when user clicks refresh devices
+
+// Call updateDeviceList after login and after player setup
+// In initialization, after setupPlayer():
+// setTimeout(() => updateDeviceList(), 1200);
+// Also call updateDeviceList when user clicks refresh devices
+
+// Call updateDeviceList after login and after player setup
+// In initialization, after setupPlayer():
+// setTimeout(() => updateDeviceList(), 1200);
+// Also call updateDeviceList when user clicks refresh devices 
